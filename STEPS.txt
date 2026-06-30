@@ -1,0 +1,395 @@
+================================================================
+  LANGIT NODE — PANDUAN LENGKAP
+  Self-service VPS Platform berbasis Proxmox
+================================================================
+
+================================================================
+  STRUKTUR PROJECT
+================================================================
+
+langit-node/
+├── apps/
+│   ├── api/          → NestJS backend (port 3000)
+│   ├── web/          → User portal Next.js (port 3001)
+│   └── admin/        → Admin panel Next.js (port 3002)
+├── packages/
+│   ├── types/        → Shared TypeScript interfaces
+│   ├── ui/           → Shared React components
+│   └── utils/        → Helper functions (formatRupiah, dll)
+├── nginx/
+│   └── nginx.conf    → Reverse proxy config
+├── scripts/
+│   ├── dev-setup.sh          → Auto setup local dev
+│   ├── setup-proxmox.sh      → Setup host Proxmox VE
+│   └── setup-mikrotik.rsc    → Setup Mikrotik RouterOS
+├── docker-compose.yml
+└── README.md
+
+
+================================================================
+  A. RUNNING LOCAL (Development & Testing)
+================================================================
+
+PRASYARAT (install dulu di Mac):
+  - Node.js 20+     → https://nodejs.org
+  - Docker Desktop  → https://www.docker.com/products/docker-desktop
+  - pnpm            → npm install -g pnpm
+
+------------------------------------------------------------
+LANGKAH 1: Install dependencies
+------------------------------------------------------------
+
+  cd "/Applications/XAMPP/xamppfiles/htdocs/Workspace/Langit Node"
+  pnpm install
+
+
+------------------------------------------------------------
+LANGKAH 2: Nyalakan Postgres + Redis
+------------------------------------------------------------
+
+  docker compose up postgres redis -d
+
+  Cek sudah jalan:
+  docker compose ps
+
+
+------------------------------------------------------------
+LANGKAH 3: Isi environment variables
+------------------------------------------------------------
+
+  Edit file: apps/api/.env
+
+  Bagian yang WAJIB diisi:
+
+  # Proxmox (pakai Tailscale IP kalau remote)
+  PROXMOX_HOST="100.x.x.x"
+  PROXMOX_TOKEN_ID="langitnode@pve!langitnode-token"
+  PROXMOX_TOKEN_SECRET="uuid-dari-proxmox"
+  PROXMOX_VERIFY_SSL="false"
+
+  # Mikrotik (untuk VM NAT)
+  MIKROTIK_HOST="100.x.x.x"
+  MIKROTIK_USER="langitnode-api"
+  MIKROTIK_PASS="password-mikrotik"
+
+  # JWT — ganti dengan random string panjang!
+  JWT_SECRET="random-string-minimal-32-karakter"
+  ADMIN_JWT_SECRET="random-string-lain-berbeda"
+
+  # Midtrans (pakai Sandbox dulu untuk testing)
+  MIDTRANS_SERVER_KEY="SB-Mid-server-xxxx"
+  MIDTRANS_CLIENT_KEY="SB-Mid-client-xxxx"
+  MIDTRANS_IS_PRODUCTION="false"
+
+  # SMTP (email)
+  SMTP_HOST="smtp.gmail.com"
+  SMTP_USER="email@gmail.com"
+  SMTP_PASS="app-password-gmail"
+
+  File web & admin cukup:
+  apps/web/.env.local   → NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+  apps/admin/.env.local → NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+
+
+------------------------------------------------------------
+LANGKAH 4: Setup database (sekali saja)
+------------------------------------------------------------
+
+  cd apps/api
+  npx prisma db push
+  cd ../..
+
+
+------------------------------------------------------------
+LANGKAH 5: Buat superadmin + paket default (sekali saja)
+------------------------------------------------------------
+
+  Buat file apps/api/prisma/seed.ts lalu isi:
+
+  ---
+  import { PrismaClient } from '@prisma/client'
+  import * as bcrypt from 'bcrypt'
+  const prisma = new PrismaClient()
+  async function main() {
+    await prisma.adminUser.upsert({
+      where: { email: 'superadmin@langitnode.id' },
+      update: {},
+      create: {
+        email: 'superadmin@langitnode.id',
+        passwordHash: await bcrypt.hash('Admin@123!', 12),
+        role: 'superadmin',
+      },
+    })
+    await prisma.package.createMany({
+      skipDuplicates: true,
+      data: [
+        { name: 'Nano NAT', cpu: 1, ram: 512, disk: 10, pricePerHour: 50, ipType: 'nat', osTemplates: ['ubuntu-22.04-cloudinit'] },
+        { name: 'Micro NAT', cpu: 1, ram: 1024, disk: 20, pricePerHour: 100, ipType: 'nat', osTemplates: ['ubuntu-22.04-cloudinit'] },
+        { name: 'Small Public', cpu: 2, ram: 2048, disk: 40, pricePerHour: 300, ipType: 'public', osTemplates: ['ubuntu-22.04-cloudinit'] },
+      ],
+    })
+    console.log('Seed selesai.')
+    await prisma.$disconnect()
+  }
+  main()
+  ---
+
+  Tambahkan ke apps/api/package.json:
+  "prisma": { "seed": "ts-node prisma/seed.ts" }
+
+  Jalankan:
+  cd apps/api && npx prisma db seed && cd ../..
+
+
+------------------------------------------------------------
+LANGKAH 6: Jalankan semua app
+------------------------------------------------------------
+
+  pnpm dev
+
+  Buka di browser:
+  - User portal  → http://localhost:3001
+  - Admin panel  → http://localhost:3002  (login: superadmin@langitnode.id / Admin@123!)
+  - API          → http://localhost:3000/api/v1
+
+
+================================================================
+  B. RUNNING PRODUCTION (Deploy ke VPS)
+================================================================
+
+PRASYARAT:
+  - VPS Ubuntu 22.04 (minimal 2 CPU, 2GB RAM)
+  - Domain yang sudah diarahkan ke IP VPS
+  - Proxmox sudah dikonfigurasi (lihat bagian C)
+
+------------------------------------------------------------
+LANGKAH 1: Install Docker di VPS
+------------------------------------------------------------
+
+  ssh root@IP_VPS
+  curl -fsSL https://get.docker.com | sh
+
+
+------------------------------------------------------------
+LANGKAH 2: Clone repo
+------------------------------------------------------------
+
+  git clone https://github.com/asaptr/langit-node.git
+  cd langit-node
+
+
+------------------------------------------------------------
+LANGKAH 3: Isi env production
+------------------------------------------------------------
+
+  Edit apps/api/.env — ganti semua nilai:
+  - JWT_SECRET & ADMIN_JWT_SECRET → random string panjang (buat di: openssl rand -hex 32)
+  - PROXMOX_HOST → IP Proxmox (Tailscale atau internal)
+  - MIDTRANS_IS_PRODUCTION="true" + pakai key production
+  - SMTP dengan email production
+
+  Edit nginx/nginx.conf — ganti:
+  - server_name langitnode.id www.langitnode.id  → domain kamu
+  - server_name admin.langitnode.id              → subdomain admin kamu
+
+
+------------------------------------------------------------
+LANGKAH 4: Build & jalankan semua service
+------------------------------------------------------------
+
+  docker compose up -d --build
+
+  Cek status:
+  docker compose ps
+  docker compose logs -f api
+
+
+------------------------------------------------------------
+LANGKAH 5: Migrate database (sekali saja)
+------------------------------------------------------------
+
+  docker compose exec api npx prisma migrate deploy
+
+
+------------------------------------------------------------
+LANGKAH 6: Seed superadmin (sekali saja)
+------------------------------------------------------------
+
+  docker compose exec api npx prisma db seed
+
+
+------------------------------------------------------------
+LANGKAH 7: Setup domain & SSL (opsional tapi recommended)
+------------------------------------------------------------
+
+  Install Certbot di VPS:
+  apt install certbot python3-certbot-nginx -y
+  certbot --nginx -d langitnode.id -d www.langitnode.id -d admin.langitnode.id
+
+  Akses:
+  - User portal → https://langitnode.id
+  - Admin panel → https://admin.langitnode.id
+
+
+================================================================
+  C. SETUP PROXMOX (jalankan di host PVE sebagai root)
+================================================================
+
+  Atau jalankan otomatis:
+  bash scripts/setup-proxmox.sh
+
+------------------------------------------------------------
+Manual steps:
+------------------------------------------------------------
+
+1. BUAT API TOKEN
+   Di Proxmox UI: Datacenter → API Tokens → Add
+   - User: langitnode@pve
+   - Token ID: langitnode-token
+   - Privilege Separation: NO (centang off)
+   Salin token secret ke apps/api/.env → PROXMOX_TOKEN_SECRET
+
+2. INSTALL QEMU GUEST AGENT DI TEMPLATE
+   Wajib agar API bisa set password & hostname di dalam VM.
+
+   Download image Ubuntu:
+   wget -O /tmp/jammy.img https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+
+   Inject guest agent:
+   apt install libguestfs-tools -y
+   virt-customize -a /tmp/jammy.img --install qemu-guest-agent
+
+   Buat template (VMID 9000):
+   qm create 9000 --name ubuntu-22.04-cloudinit --memory 1024 --cores 1 --net0 virtio,bridge=vmbr0 --ostype l26 --agent enabled=1
+   qm importdisk 9000 /tmp/jammy.img local-lvm
+   qm set 9000 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9000-disk-0 --ide2 local-lvm:cloudinit --boot c --bootdisk scsi0 --serial0 socket --vga serial0
+   qm template 9000
+
+3. SETUP BRIDGE vmbr1 (untuk VM NAT)
+   Tambahkan ke /etc/network/interfaces:
+
+   auto vmbr1
+   iface vmbr1 inet static
+       address 10.20.0.1/24
+       bridge-ports none
+       bridge-stp off
+       bridge-fd 0
+       post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+       post-up   iptables -t nat -A POSTROUTING -s '10.20.0.0/24' -o vmbr0 -j MASQUERADE
+       post-down iptables -t nat -D POSTROUTING -s '10.20.0.0/24' -o vmbr0 -j MASQUERADE
+
+   Aktifkan:
+   ifup vmbr1
+
+4. SETUP dnsmasq (DHCP untuk VM NAT)
+   apt install dnsmasq -y
+
+   /etc/dnsmasq.conf:
+   interface=vmbr1
+   bind-interfaces
+   dhcp-range=10.20.0.2,10.20.0.254,12h
+   conf-dir=/etc/dnsmasq.d/,*.conf
+
+   systemctl enable dnsmasq && systemctl restart dnsmasq
+
+   Izinkan API reload dnsmasq:
+   echo "langitnode ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload dnsmasq" > /etc/sudoers.d/langitnode-dnsmasq
+
+
+================================================================
+  D. SETUP MIKROTIK (untuk VM NAT)
+================================================================
+
+  Jalankan script: scripts/setup-mikrotik.rsc di WinBox Terminal
+  Atau manual:
+
+  # Aktifkan API
+  /ip service set api disabled=no port=8728
+
+  # Buat user
+  /user add name=langitnode-api password=GantiIni group=write
+
+  # Masquerade VM NAT ke internet
+  /ip firewall nat add chain=srcnat src-address=10.20.0.0/24 out-interface=ether1 action=masquerade
+
+
+================================================================
+  E. PERINTAH BERGUNA SEHARI-HARI
+================================================================
+
+  # Lihat log real-time
+  docker compose logs -f api
+  docker compose logs -f web
+
+  # Restart satu service
+  docker compose restart api
+
+  # Buka Prisma Studio (GUI database)
+  pnpm db:studio
+  → http://localhost:5555
+
+  # Jalankan unit test
+  cd apps/api && pnpm test
+
+  # Push schema setelah edit prisma/schema.prisma
+  pnpm db:push
+
+  # Build ulang image production
+  docker compose build api --no-cache
+  docker compose up -d api
+
+  # Update dari GitHub
+  git pull
+  docker compose up -d --build
+
+
+================================================================
+  F. AKUN DEFAULT (setelah seed)
+================================================================
+
+  Admin Panel (http://localhost:3002):
+  Email    : superadmin@langitnode.id
+  Password : Admin@123!
+  (Ganti password setelah login pertama!)
+
+
+================================================================
+  G. ENVIRONMENT VARIABLES LENGKAP (apps/api/.env)
+================================================================
+
+  DATABASE_URL         → PostgreSQL connection string
+  JWT_SECRET           → Secret token user (min 32 char, random)
+  JWT_EXPIRES_IN       → Masa berlaku access token (default: 15m)
+  JWT_REFRESH_EXPIRES_IN → Masa berlaku refresh token (default: 7d)
+  ADMIN_JWT_SECRET     → Secret token admin (BEDA dari JWT_SECRET)
+  REDIS_HOST           → Redis host (default: localhost)
+  REDIS_PORT           → Redis port (default: 6379)
+  PROXMOX_HOST         → IP/hostname Proxmox (bisa Tailscale IP)
+  PROXMOX_PORT         → Port Proxmox API (default: 8006)
+  PROXMOX_TOKEN_ID     → Format: user@pve!token-name
+  PROXMOX_TOKEN_SECRET → UUID token dari Proxmox
+  PROXMOX_NODE         → Nama node default (biasanya: pve)
+  PROXMOX_VERIFY_SSL   → false untuk self-signed cert
+  MIKROTIK_HOST        → IP Mikrotik
+  MIKROTIK_USER        → User API Mikrotik
+  MIKROTIK_PASS        → Password user Mikrotik
+  NAT_BRIDGE           → Bridge VM NAT (default: vmbr1)
+  NAT_GATEWAY          → Gateway subnet NAT (default: 10.20.0.1)
+  PUBLIC_BRIDGE        → Bridge VM Public IP (default: vmbr0)
+  MIDTRANS_SERVER_KEY  → Server key Midtrans (SB- prefix = sandbox)
+  MIDTRANS_CLIENT_KEY  → Client key Midtrans
+  MIDTRANS_IS_PRODUCTION → false (sandbox) / true (production)
+  SMTP_HOST            → SMTP server
+  SMTP_PORT            → SMTP port (587 untuk TLS)
+  SMTP_USER            → Email pengirim
+  SMTP_PASS            → App password (Gmail: buat di myaccount.google.com)
+  EMAIL_FROM           → "Nama <email@domain.com>"
+  PORT                 → Port API (default: 3000)
+  NODE_ENV             → development / production
+  FRONTEND_URL         → URL user portal (untuk CORS)
+  ADMIN_URL            → URL admin panel (untuk CORS)
+
+
+================================================================
+  REPO: https://github.com/asaptr/langit-node
+================================================================
