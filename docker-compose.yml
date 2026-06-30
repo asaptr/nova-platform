@@ -1,0 +1,102 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: langitnode-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langitnode
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-langitnode_dev}
+      POSTGRES_DB: langitnode
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langitnode"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: langitnode-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: langitnode-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DATABASE_URL: postgresql://langitnode:${POSTGRES_PASSWORD:-langitnode_dev}@postgres:5432/langitnode
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3000:3000"
+    volumes:
+      - /etc/dnsmasq.d:/etc/dnsmasq.d
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: langitnode-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    env_file:
+      - ./apps/web/.env.local
+    ports:
+      - "3001:3000"
+
+  admin:
+    build:
+      context: ./apps/admin
+      dockerfile: Dockerfile
+    container_name: langitnode-admin
+    restart: unless-stopped
+    depends_on:
+      - api
+    env_file:
+      - ./apps/admin/.env.local
+    ports:
+      - "3002:3000"
+
+  nginx:
+    image: nginx:alpine
+    container_name: langitnode-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+      - admin
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+
+volumes:
+  postgres_data:
+  redis_data:

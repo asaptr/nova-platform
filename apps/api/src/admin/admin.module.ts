@@ -1,0 +1,41 @@
+import { Module } from '@nestjs/common'
+import { JwtModule } from '@nestjs/jwt'
+import { PassportModule } from '@nestjs/passport'
+import { ConfigService } from '@nestjs/config'
+import { AdminAuthService } from './admin-auth.service'
+import { AdminAuthController } from './admin-auth.controller'
+import { AdminVmsController } from './admin-vms.controller'
+import { AdminFinanceController } from './admin-finance.controller'
+import { AdminUsersController } from './admin-users.controller'
+import { AdminTicketsController } from './admin-tickets.controller'
+import { AdminNodesController } from './admin-nodes.controller'
+import { AdminPackagesController } from './admin-packages.controller'
+import { AdminJwtStrategy } from './admin-jwt.strategy'
+import { ProxmoxModule } from '../proxmox/proxmox.module'
+import { MikrotikModule } from '../mikrotik/mikrotik.module'
+import { RolesGuard } from '../common/guards/roles.guard'
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        secret: config.get('ADMIN_JWT_SECRET'),
+      }),
+    }),
+    ProxmoxModule,
+    MikrotikModule,
+  ],
+  providers: [AdminAuthService, AdminJwtStrategy, RolesGuard],
+  controllers: [
+    AdminAuthController,
+    AdminVmsController,
+    AdminFinanceController,
+    AdminUsersController,
+    AdminTicketsController,
+    AdminNodesController,
+    AdminPackagesController,
+  ],
+})
+export class AdminModule {}
