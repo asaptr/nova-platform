@@ -1,7 +1,17 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common'
+import {
+  Controller, Get, Post, Patch, Body, Param, UseGuards, UseInterceptors,
+  UploadedFile, BadRequestException,
+} from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { diskStorage } from 'multer'
+import { extname, join } from 'path'
+import { existsSync, mkdirSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { TicketsService } from './tickets.service'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { CurrentUser } from '../common/decorators/current-user.decorator'
+
+const uploadDir = join(process.cwd(), 'uploads', 'tickets')
 
 @Controller('tickets')
 @UseGuards(JwtAuthGuard)
@@ -16,7 +26,7 @@ export class TicketsController {
   @Post()
   create(
     @CurrentUser('sub') userId: string,
-    @Body() body: { subject: string; vmId?: string; priority?: string; firstMessage: string },
+    @Body() body: { subject: string; firstMessage: string; vmId?: string; priority?: string },
   ) {
     return this.tickets.createTicket(userId, body)
   }
@@ -27,15 +37,34 @@ export class TicketsController {
   }
 
   @Post(':id/reply')
-  reply(
+  @UseInterceptors(FileInterceptor('attachment', {
+    storage: diskStorage({
+      destination: (_req, _file, cb) => {
+        if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true })
+        cb(null, uploadDir)
+      },
+      filename: (_req, file, cb) => {
+        cb(null, `${randomUUID()}${extname(file.originalname)}`)
+      },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+      cb(null, allowed.includes(extname(file.originalname).toLowerCase()))
+    },
+  }))
+  async reply(
     @CurrentUser('sub') userId: string,
     @Param('id') id: string,
-    @Body() body: { message: string },
+    @Body('message') message: string,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.tickets.replyToTicket(id, userId, body.message)
+    if (!message?.trim() && !file) throw new BadRequestException('Pesan atau lampiran wajib ada')
+    const attachmentUrl = file ? `/uploads/tickets/${file.filename}` : undefined
+    return this.tickets.replyToTicket(id, userId, message ?? '', attachmentUrl)
   }
 
-  @Post(':id/close')
+  @Patch(':id/close')
   close(@CurrentUser('sub') userId: string, @Param('id') id: string) {
     return this.tickets.closeTicket(id, userId)
   }

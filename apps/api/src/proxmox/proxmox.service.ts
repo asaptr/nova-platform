@@ -57,8 +57,7 @@ export class ProxmoxService {
       scsihw: 'virtio-scsi-pci',
       boot: 'order=scsi0',
       agent: 'enabled=1',
-      serial0: 'socket',
-      vga: 'serial0',
+      vga: 'std',
     }
 
     if (params.osTemplate) {
@@ -73,13 +72,23 @@ export class ProxmoxService {
     return data
   }
 
-  async cloneVm(node: string, templateVmid: number, newVmid: number, name: string, diskGb: number) {
-    const { data } = await this.client.post(`/nodes/${node}/qemu/${templateVmid}/clone`, {
-      newid: newVmid,
-      name,
-      full: 1,
-      storage: 'local-lvm',
-    })
+  async cloneVm(node: string, templateVmid: number, newVmid: number, name: string, storage?: string) {
+    const body: Record<string, any> = { newid: newVmid, name, full: 1 }
+    if (storage) body.storage = storage
+    const { data } = await this.client.post(`/nodes/${node}/qemu/${templateVmid}/clone`, body)
+    return data.data as string
+  }
+
+  async updateVmConfig(node: string, vmid: number, config: Record<string, any>) {
+    const { data } = await this.client.put(`/nodes/${node}/qemu/${vmid}/config`, config)
+    // Proxmox may return a UPID task (e.g. for cloud-init changes) — wait for it
+    if (data?.data && typeof data.data === 'string' && data.data.startsWith('UPID:')) {
+      await this.waitForTask(node, data.data)
+    }
+  }
+
+  async createVmRaw(node: string, body: Record<string, any>) {
+    const { data } = await this.client.post(`/nodes/${node}/qemu`, body)
     return data
   }
 
@@ -92,11 +101,18 @@ export class ProxmoxService {
 
   async startVm(node: string, vmid: number) {
     const { data } = await this.client.post(`/nodes/${node}/qemu/${vmid}/status/start`)
+    // start returns a UPID — wait for it to confirm VM actually started
+    if (data?.data && typeof data.data === 'string') {
+      await this.waitForTask(node, data.data)
+    }
     return data
   }
 
   async stopVm(node: string, vmid: number) {
     const { data } = await this.client.post(`/nodes/${node}/qemu/${vmid}/status/stop`)
+    if (data?.data && typeof data.data === 'string') {
+      await this.waitForTask(node, data.data)
+    }
     return data
   }
 
@@ -121,7 +137,10 @@ export class ProxmoxService {
   }
 
   async deleteVm(node: string, vmid: number) {
-    const { data } = await this.client.delete(`/nodes/${node}/qemu/${vmid}`)
+    const { data } = await this.client.delete(`/nodes/${node}/qemu/${vmid}`, { params: { purge: 1 } })
+    if (data?.data && typeof data.data === 'string') {
+      await this.waitForTask(node, data.data)
+    }
     return data
   }
 
@@ -136,11 +155,23 @@ export class ProxmoxService {
   }
 
   async setRootPassword(node: string, vmid: number, password: string) {
-    const { data } = await this.client.post(
-      `/nodes/${node}/qemu/${vmid}/agent/set-user-password`,
-      { username: 'root', password },
-    )
-    return data
+    try {
+      const { data } = await this.client.post(
+        `/nodes/${node}/qemu/${vmid}/agent/set-user-password`,
+        { username: 'root', password },
+      )
+      return data
+    } catch (e: any) {
+      // Fallback: use agent exec with chpasswd (also requires agent, but different codepath)
+      const status = e?.response?.status
+      if (status === 500 || status === 400) {
+        const { data } = await this.client.post(`/nodes/${node}/qemu/${vmid}/agent/exec`, {
+          command: ['bash', '-c', `echo "root:${password}" | chpasswd`],
+        })
+        return data
+      }
+      throw e
+    }
   }
 
   async setHostname(node: string, vmid: number, hostname: string) {
@@ -173,6 +204,42 @@ export class ProxmoxService {
       }
     }
     throw new Error(`QEMU agent VM ${vmid} tidak ready dalam ${timeoutMs / 1000}s`)
+  }
+
+  async listVms(node: string) {
+    const { data } = await this.client.get(`/nodes/${node}/qemu`)
+    return (data.data as any[])
+      .sort((a, b) => a.vmid - b.vmid)
+      .map(vm => ({
+        vmid: String(vm.vmid),
+        name: vm.name ?? `VM ${vm.vmid}`,
+        status: vm.status,
+        isTemplate: vm.template === 1,
+      }))
+  }
+
+  async listStorageIsos(node: string) {
+    const { data: storageRes } = await this.client.get(`/nodes/${node}/storage`)
+    const storages = (storageRes.data as any[]).filter(s =>
+      s.content?.split(',').includes('iso') && s.active === 1,
+    )
+    const results = await Promise.allSettled(
+      storages.map(async (s) => {
+        const { data } = await this.client.get(
+          `/nodes/${node}/storage/${s.storage}/content`,
+          { params: { content: 'iso' } },
+        )
+        return (data.data as any[]).map(item => ({
+          volid: item.volid,
+          name: item.volid.split('/').pop(),
+          storage: s.storage,
+          size: item.size,
+        }))
+      }),
+    )
+    return results
+      .filter((r): r is PromiseFulfilledResult<any[]> => r.status === 'fulfilled')
+      .flatMap(r => r.value)
   }
 
   async waitForTask(node: string, upid: string, timeoutMs = 300_000): Promise<void> {

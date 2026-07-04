@@ -20,7 +20,11 @@ export default function AdminUserDetailPage() {
 
   useEffect(() => {
     setRole(localStorage.getItem('admin_role') ?? '')
-    api.get(`/admin/users/${id}`).then(r => { setUser(r.data); setLoading(false) })
+    api.get(`/admin/users/${id}`).then(r => {
+      const { user, vms, transactions, auditLogs } = r.data
+      setUser({ ...user, vms, transactions, auditLogs })
+      setLoading(false)
+    })
   }, [id])
 
   async function toggleStatus() {
@@ -32,11 +36,12 @@ export default function AdminUserDetailPage() {
 
   async function adjustBalance() {
     try {
-      await api.post(`/admin/finance/adjust-balance`, { userId: id, amount: Number(adjustAmount), note: adjustNote })
+      await api.post(`/admin/finance/users/${id}/adjust-balance`, { amount: Number(adjustAmount), notes: adjustNote })
       setMsg('Saldo berhasil disesuaikan')
       setAdjustAmount(''); setAdjustNote('')
       const { data } = await api.get(`/admin/users/${id}`)
-      setUser(data)
+      const { user, vms, transactions, auditLogs } = data
+      setUser({ ...user, vms, transactions, auditLogs })
     } catch (e: any) {
       setMsg(e.response?.data?.message ?? 'Gagal')
     }

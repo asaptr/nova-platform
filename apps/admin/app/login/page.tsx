@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { Shield } from 'lucide-react'
+import { ThemeToggle } from '@/components/layout/theme-toggle'
 
 export default function AdminLoginPage() {
   const router = useRouter()
@@ -17,7 +18,7 @@ export default function AdminLoginPage() {
       localStorage.setItem('admin_token', data.accessToken)
       localStorage.setItem('admin_role', data.admin.role)
       localStorage.setItem('admin_email', data.admin.email)
-      router.push('/dashboard')
+      router.push('/')
     } catch (e: any) {
       setError(e.response?.data?.message ?? 'Login gagal')
     } finally { setLoading(false) }
@@ -25,13 +26,16 @@ export default function AdminLoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-2">
           <div className="p-3 rounded-2xl bg-accent/10">
             <Shield size={28} className="text-accent" />
           </div>
           <h1 className="text-2xl font-bold">Admin Login</h1>
-          <p className="text-sm text-muted">Langit Node — Panel Operator</p>
+          <p className="text-sm text-muted">NOVA — Panel Operator</p>
         </div>
         <form onSubmit={submit} className="bg-card border border-border rounded-xl p-6 space-y-4">
           <div className="space-y-1.5">
@@ -39,7 +43,7 @@ export default function AdminLoginPage() {
             <input type="email" required value={form.email}
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
               className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
-              placeholder="admin@langitnode.id"
+              placeholder="admin@domain.com"
             />
           </div>
           <div className="space-y-1.5">

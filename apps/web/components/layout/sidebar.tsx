@@ -1,11 +1,11 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Server, CreditCard, Ticket, Settings, LogOut, Cloud } from 'lucide-react'
+import { Server, CreditCard, Ticket, Settings, LogOut, Cloud } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useEffect, useState } from 'react'
 
 const nav = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/vms', label: 'VM Saya', icon: Server },
   { href: '/billing', label: 'Billing', icon: CreditCard },
   { href: '/support', label: 'Support', icon: Ticket },
@@ -14,18 +14,27 @@ const nav = [
 
 export function Sidebar() {
   const path = usePathname()
+  const [brandName, setBrandName] = useState('NOVA')
+
+  useEffect(() => {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') ?? 'http://localhost:3000'}/api/v1/brand`)
+      .then(r => r.json())
+      .then(d => { if (d.name) setBrandName(d.name) })
+      .catch(() => {})
+  }, [])
 
   function logout() {
-    localStorage.clear()
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
     window.location.href = '/login'
   }
 
   return (
     <aside className="w-60 min-h-screen flex flex-col bg-card border-r border-border">
-      <div className="flex items-center gap-2 px-5 py-5 border-b border-border">
-        <Cloud size={22} className="text-accent" />
-        <span className="font-semibold text-lg tracking-tight">Langit Node</span>
-      </div>
+      <Link href="/vms" className="flex items-center gap-2 px-5 py-5 border-b border-border hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+        <Cloud size={22} className="text-accent flex-shrink-0" />
+        <span className="font-semibold text-lg tracking-tight truncate">{brandName}</span>
+      </Link>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5">
         {nav.map(({ href, label, icon: Icon }) => (

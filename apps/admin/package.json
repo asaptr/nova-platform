@@ -10,7 +10,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@langitnode/types": "*",
+    "@langitnode/types": "workspace:*",
     "next": "^14.2.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -19,7 +19,8 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.3.0",
     "lucide-react": "^0.395.0",
-    "recharts": "^2.12.7"
+    "recharts": "^2.12.7",
+    "@novnc/novnc": "^1.7.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",

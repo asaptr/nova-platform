@@ -1,21 +1,23 @@
 'use client'
 import { useState, lazy, Suspense } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useVmStatus } from '@/hooks/use-vm-status'
 import { VmStatusBadge } from '@/components/vm/vm-status-badge'
 import api from '@/lib/api'
 import { formatDate, formatRupiah } from '@/lib/utils'
-import { Copy, Terminal, RefreshCw, Play, Square, RotateCcw } from 'lucide-react'
+import { Copy, Terminal, RefreshCw, Play, Square, RotateCcw, Trash2 } from 'lucide-react'
 
 const VmConsole = lazy(() => import('@/components/vm/vm-console').then(m => ({ default: m.VmConsole })))
 
 export default function VmDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
   const { vm, loading, refetch } = useVmStatus(id)
   const [showConsole, setShowConsole] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [showResetPw, setShowResetPw] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   async function action(type: string, body?: Record<string, any>) {
     setActionLoading(type)
@@ -29,11 +31,23 @@ export default function VmDetailPage() {
     }
   }
 
+  async function deleteVm() {
+    setActionLoading('delete')
+    try {
+      await api.delete(`/vms/${id}`)
+      router.push('/vms')
+    } catch (e: any) {
+      alert(e.response?.data?.message ?? 'Gagal menghapus VM')
+      setActionLoading(null)
+      setShowDeleteConfirm(false)
+    }
+  }
+
   if (loading) return <div className="h-64 bg-card border border-border rounded-xl animate-pulse" />
   if (!vm) return <p className="text-muted">VM tidak ditemukan.</p>
 
   const isNat = vm.ipType === 'nat'
-  const sshCmd = isNat ? `ssh root@${vm.ipAddress} -p ${vm.sshPort}` : `ssh root@${vm.ipAddress}`
+  const sshCmd = `ssh root@${vm.ipAddress}`
 
   return (
     <div className="space-y-5 max-w-3xl">
@@ -67,36 +81,57 @@ export default function VmDetailPage() {
           >
             <RotateCcw size={14} /> Reboot
           </button>
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={!!actionLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-red-200 dark:border-red-900 rounded-lg text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-40 transition-colors"
+          >
+            <Trash2 size={14} /> Hapus
+          </button>
         </div>
       </div>
 
       {/* Info grid */}
-      <div className="bg-card border border-border rounded-xl p-5 grid grid-cols-2 gap-y-4 gap-x-8">
-        {[
-          ['IP Address', vm.ipAddress ?? '—'],
-          ['Port SSH', vm.sshPort ?? '—'],
-          ['Username', 'root'],
-          ['OS', vm.osTemplate ?? '—'],
-          ['Paket', (vm as any).package?.name ?? '—'],
-          ['Dibuat', formatDate(vm.createdAt)],
-        ].map(([k, v]) => (
-          <div key={k}>
-            <p className="text-xs text-muted">{k}</p>
-            <p className="font-medium text-sm mt-0.5 font-mono">{String(v)}</p>
+      <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-y-4 gap-x-8">
+          <div>
+            <p className="text-xs text-muted">Tipe Jaringan</p>
+            <span className={`inline-block mt-0.5 text-xs px-2 py-0.5 rounded font-medium ${
+              isNat ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300'
+            }`}>{isNat ? 'NAT' : 'Public IP'}</span>
           </div>
-        ))}
+          <div>
+            <p className="text-xs text-muted">OS</p>
+            <p className="font-medium text-sm mt-0.5">{(vm as any).templateName ?? vm.osTemplate ?? '—'}</p>
+          </div>
+          {!isNat && (
+            <div>
+              <p className="text-xs text-muted">IP Address</p>
+              <p className="font-medium text-sm mt-0.5 font-mono">{vm.ipAddress ?? '—'}</p>
+            </div>
+          )}
+          <div>
+            <p className="text-xs text-muted">Username</p>
+            <p className="font-medium text-sm mt-0.5 font-mono">root</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted">Paket</p>
+            <p className="font-medium text-sm mt-0.5">{(vm as any).package?.name ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted">Dibuat</p>
+            <p className="font-medium text-sm mt-0.5">{formatDate(vm.createdAt)}</p>
+          </div>
+        </div>
       </div>
 
-      {/* SSH command */}
-      {vm.status === 'running' && vm.ipAddress && (
+      {/* SSH command — public IP only */}
+      {!isNat && vm.status === 'running' && vm.ipAddress && (
         <div className="bg-card border border-border rounded-xl p-4 space-y-2">
           <p className="text-xs font-medium text-muted uppercase tracking-wide">Perintah SSH</p>
           <div className="flex items-center gap-2 bg-black/5 dark:bg-white/5 rounded-lg px-3 py-2">
             <code className="text-sm flex-1 font-mono">{sshCmd}</code>
-            <button
-              onClick={() => navigator.clipboard.writeText(sshCmd)}
-              className="text-muted hover:text-primary"
-            >
+            <button onClick={() => navigator.clipboard.writeText(sshCmd)} className="text-muted hover:text-primary">
               <Copy size={15} />
             </button>
           </div>
@@ -163,6 +198,42 @@ export default function VmDetailPage() {
           </Suspense>
         )}
       </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-red-100 dark:bg-red-950">
+                <Trash2 size={18} className="text-red-500" />
+              </div>
+              <div>
+                <p className="font-semibold">Hapus VM?</p>
+                <p className="text-xs text-muted mt-0.5">{vm.hostname} · {vm.displayId}</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted">
+              VM akan dihentikan dan dihapus permanen dari server. Tagihan berhenti setelah VM dihapus.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={actionLoading === 'delete'}
+                className="flex-1 py-2 border border-border rounded-lg text-sm hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={deleteVm}
+                disabled={actionLoading === 'delete'}
+                className="flex-1 py-2 bg-red-500 text-white rounded-lg text-sm font-medium hover:bg-red-600 disabled:opacity-50 transition-colors"
+              >
+                {actionLoading === 'delete' ? 'Menghapus...' : 'Ya, Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

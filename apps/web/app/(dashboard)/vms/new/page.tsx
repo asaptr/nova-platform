@@ -6,13 +6,7 @@ import { formatRupiah } from '@/lib/utils'
 import type { Package } from '@langitnode/types'
 import { RefreshCw } from 'lucide-react'
 
-const OS_TEMPLATES = [
-  { label: 'Ubuntu 22.04 LTS', value: 'ubuntu-22.04' },
-  { label: 'Ubuntu 20.04 LTS', value: 'ubuntu-20.04' },
-  { label: 'Debian 12', value: 'debian-12' },
-  { label: 'Debian 11', value: 'debian-11' },
-  { label: 'AlmaLinux 9', value: 'almalinux-9' },
-]
+type OsTemplate = { id: string; name: string; description: string | null; osFamily: string; proxmoxValue: string }
 
 function generatePassword() {
   const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -22,10 +16,10 @@ function generatePassword() {
 export default function NewVmPage() {
   const router = useRouter()
   const [packages, setPackages] = useState<Package[]>([])
+  const [templates, setTemplates] = useState<OsTemplate[]>([])
   const [form, setForm] = useState({
     packageId: '',
-    osTemplate: 'ubuntu-22.04',
-    hostname: '',
+    osTemplate: '',
     rootPassword: '',
   })
   const [loading, setLoading] = useState(false)
@@ -33,9 +27,11 @@ export default function NewVmPage() {
   const [ipFilter, setIpFilter] = useState<'all' | 'nat' | 'public'>('all')
 
   useEffect(() => {
-    api.get('/vms/packages').then(r => {
-      setPackages(r.data)
-      if (r.data.length > 0) setForm(f => ({ ...f, packageId: r.data[0].id }))
+    Promise.all([api.get('/vms/packages'), api.get('/vms/templates')]).then(([pkgs, tmpl]) => {
+      setPackages(pkgs.data)
+      setTemplates(tmpl.data)
+      if (pkgs.data.length > 0) setForm(f => ({ ...f, packageId: pkgs.data[0].id }))
+      if (tmpl.data.length > 0) setForm(f => ({ ...f, osTemplate: tmpl.data[0].proxmoxValue }))
     })
   }, [])
 
@@ -116,27 +112,29 @@ export default function NewVmPage() {
         </div>
 
         {/* OS Template */}
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <label className="text-sm font-medium">OS Template</label>
-          <select
-            value={form.osTemplate}
-            onChange={e => setForm(f => ({ ...f, osTemplate: e.target.value }))}
-            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
-          >
-            {OS_TEMPLATES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-
-        {/* Hostname */}
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium">Hostname <span className="text-muted font-normal">(opsional)</span></label>
-          <input
-            type="text"
-            value={form.hostname}
-            onChange={e => setForm(f => ({ ...f, hostname: e.target.value }))}
-            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
-            placeholder="my-server (default: ln-nat-0001)"
-          />
+          {templates.length === 0 ? (
+            <p className="text-sm text-muted border border-border rounded-lg px-3 py-2">
+              Belum ada template tersedia. Hubungi admin.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {templates.map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, osTemplate: t.proxmoxValue }))}
+                  className={`p-3 rounded-lg border text-left transition-colors ${
+                    form.osTemplate === t.proxmoxValue ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/30'
+                  }`}
+                >
+                  <p className="font-medium text-sm">{t.name}</p>
+                  {t.description && <p className="text-xs text-muted mt-0.5">{t.description}</p>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Password root */}
@@ -163,10 +161,10 @@ export default function NewVmPage() {
         </div>
 
         {selectedPkg && (
-          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm">
-            <p className="font-medium text-amber-800 dark:text-amber-300">Konfirmasi</p>
-            <p className="text-amber-700 dark:text-amber-400 mt-1">
-              Saldo akan dipotong <strong>{formatRupiah(Number(selectedPkg.priceHourly) * 24)}</strong> (deposit 1 hari) saat deploy.
+          <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-sm">
+            <p className="font-medium text-blue-800 dark:text-blue-300">Billing Per Jam</p>
+            <p className="text-blue-700 dark:text-blue-400 mt-1">
+              Tagihan <strong>{formatRupiah(Number(selectedPkg.priceHourly))}/jam</strong> — saldo dipotong setiap jam selama VM aktif. Tidak ada deposit di muka.
             </p>
           </div>
         )}

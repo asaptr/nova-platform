@@ -21,13 +21,21 @@ export class AdminNodesController {
       this.prisma.vm.groupBy({
         by: ['proxmoxNode', 'status'],
         _count: { id: true },
+        where: { status: { not: 'deleted' } },
       }),
     ])
 
-    return nodes.map((node: any) => ({
-      ...node,
-      vmCounts: vmStats.filter(s => s.proxmoxNode === node.node),
-    }))
+    return nodes.map((node: any) => {
+      const counts = vmStats.filter(s => s.proxmoxNode === node.node)
+      return {
+        ...node,
+        // Normalise Proxmox flat fields → nested shape the frontend expects
+        memory: { used: node.mem ?? 0, total: node.maxmem ?? 0 },
+        rootfs: { used: node.disk ?? 0, total: node.maxdisk ?? 0 },
+        vmCount: counts.reduce((sum, s) => sum + s._count.id, 0),
+        vmCounts: counts,
+      }
+    })
   }
 
   @Get(':node/status')

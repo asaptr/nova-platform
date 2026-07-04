@@ -33,7 +33,7 @@ export class NotificationsService {
 
   async sendEmailVerification(email: string, token: string) {
     const url = `${this.config.get('FRONTEND_URL')}/verify-email?token=${token}`
-    await this.send(email, 'Verifikasi Email Langit Node', `
+    await this.send(email, 'Verifikasi Email', `
       <h2>Verifikasi Email Anda</h2>
       <p>Klik link berikut untuk verifikasi email:</p>
       <a href="${url}">${url}</a>
@@ -68,7 +68,7 @@ export class NotificationsService {
   async sendLowBalanceWarning(email: string, balance: number) {
     const formatted = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(balance)
     await this.send(email, 'Peringatan: Saldo Hampir Habis', `
-      <h2>Saldo Langit Node Anda Hampir Habis</h2>
+      <h2>Saldo Anda Hampir Habis</h2>
       <p>Saldo saat ini: <strong>${formatted}</strong></p>
       <p>Segera topup untuk menghindari VM Anda di-suspend otomatis.</p>
     `)
@@ -78,7 +78,7 @@ export class NotificationsService {
     await this.send(email, `VM ${vmHostname} Di-suspend`, `
       <h2>VM Anda Di-suspend</h2>
       <p>VM <strong>${vmHostname}</strong> di-suspend karena saldo habis.</p>
-      <p>Topup saldo dalam 3 hari untuk mengaktifkan kembali. Lewat dari itu VM akan dihapus permanen.</p>
+      <p>Topup saldo dalam 7 hari untuk mengaktifkan kembali. Lewat dari itu VM akan dihapus permanen.</p>
     `)
   }
 }

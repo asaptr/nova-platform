@@ -3,8 +3,8 @@ import { ThemeProvider } from 'next-themes'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Langit Node — Admin Panel',
-  description: 'Admin dashboard for Langit Node operators',
+  title: 'NOVA — Admin Panel',
+  description: 'NOVA Node Orchestration & Virtualization Architecture — Admin Panel',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

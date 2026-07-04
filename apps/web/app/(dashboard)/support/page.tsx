@@ -3,22 +3,39 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
-import { Plus } from 'lucide-react'
+import { Plus, AlertCircle, AlertTriangle, Info, Minus } from 'lucide-react'
 import type { Ticket } from '@langitnode/types'
-import { useState as useCreateState } from 'react'
 
 const statusColor: Record<string, string> = {
   open: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300',
   in_progress: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+  waiting_admin: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+  waiting_user: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
   resolved: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
   closed: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500',
+}
+
+const statusLabel: Record<string, string> = {
+  open: 'Open',
+  in_progress: 'Diproses',
+  waiting_admin: 'Menunggu Admin',
+  waiting_user: 'Menunggu Kamu',
+  resolved: 'Resolved',
+  closed: 'Closed',
+}
+
+const priorityIcon: Record<string, { icon: any; color: string; label: string }> = {
+  critical: { icon: AlertCircle, color: 'text-red-500', label: 'Critical' },
+  major: { icon: AlertTriangle, color: 'text-orange-500', label: 'Major' },
+  minor: { icon: Info, color: 'text-blue-500', label: 'Minor' },
+  normal: { icon: Minus, color: 'text-muted', label: 'Normal' },
 }
 
 export default function SupportPage() {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ subject: '', firstMessage: '' })
+  const [form, setForm] = useState({ subject: '', firstMessage: '', priority: 'normal' })
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
@@ -32,7 +49,7 @@ export default function SupportPage() {
       const { data } = await api.post('/tickets', form)
       setTickets(t => [data, ...t])
       setShowForm(false)
-      setForm({ subject: '', firstMessage: '' })
+      setForm({ subject: '', firstMessage: '', priority: 'normal' })
     } finally {
       setCreating(false)
     }
@@ -53,6 +70,28 @@ export default function SupportPage() {
       {showForm && (
         <form onSubmit={createTicket} className="bg-card border border-border rounded-xl p-5 space-y-4">
           <h3 className="font-semibold">Tiket Baru</h3>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Prioritas</label>
+            <div className="flex gap-2 flex-wrap">
+              {(['normal', 'minor', 'major', 'critical'] as const).map(p => {
+                const { icon: Icon, color, label } = priorityIcon[p]
+                const active = form.priority === p
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, priority: p }))}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+                      active ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted hover:text-primary'
+                    }`}
+                  >
+                    <Icon size={13} className={active ? 'text-accent' : color} />
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Subjek</label>
             <input
@@ -86,15 +125,22 @@ export default function SupportPage() {
           <div className="p-5 space-y-3">{[1,2].map(i => <div key={i} className="h-14 bg-background rounded-lg animate-pulse" />)}</div>
         ) : tickets.length === 0 ? (
           <p className="p-8 text-center text-muted text-sm">Belum ada tiket support.</p>
-        ) : tickets.map(t => (
-          <Link key={t.id} href={`/support/${t.id}`} className="flex items-center gap-3 px-5 py-4 hover:bg-background/50 transition-colors">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{t.subject}</p>
-              <p className="text-xs text-muted">{formatDate(t.createdAt)}</p>
-            </div>
-            <span className={`text-xs px-2 py-0.5 rounded font-medium ${statusColor[t.status]}`}>{t.status}</span>
-          </Link>
-        ))}
+        ) : tickets.map(t => {
+          const pInfo = priorityIcon[t.priority ?? 'normal'] ?? priorityIcon.normal
+          const PIcon = pInfo.icon
+          return (
+            <Link key={t.id} href={`/support/${t.id}`} className="flex items-center gap-3 px-5 py-4 hover:bg-background/50 transition-colors">
+              <PIcon size={15} className={pInfo.color} title={pInfo.label} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{t.subject}</p>
+                <p className="text-xs text-muted">{formatDate(t.createdAt)}</p>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${statusColor[t.status] ?? statusColor.open}`}>
+                {statusLabel[t.status] ?? t.status}
+              </span>
+            </Link>
+          )
+        })}
       </div>
     </div>
   )

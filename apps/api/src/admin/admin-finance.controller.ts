@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common'
 import { AdminJwtGuard } from './admin-jwt.guard'
 import { RolesGuard } from '../common/guards/roles.guard'
 import { Roles } from '../common/decorators/roles.decorator'
@@ -108,10 +108,11 @@ export class AdminFinanceController {
 
   @Post('users/:userId/adjust-balance')
   async adjustBalance(
+    @Param('userId') userId: string,
     @CurrentUser('sub') adminId: string,
-    @Body() body: { userId: string; amount: number; notes: string },
+    @Body() body: { amount: number; notes?: string },
   ) {
-    const { userId, amount, notes } = body
+    const { amount, notes } = body
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
@@ -121,7 +122,7 @@ export class AdminFinanceController {
         data: {
           userId,
           type: 'adjustment',
-          amount: Math.abs(amount),
+          amount,
           status: 'success',
           gateway: 'manual',
           notes,

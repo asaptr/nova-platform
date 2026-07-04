@@ -1,10 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { PrismaService } from '../prisma/prisma.service'
+import { ProxmoxService } from '../proxmox/proxmox.service'
 import { MikrotikService } from '../mikrotik/mikrotik.service'
 import { NotificationsService } from '../notifications/notifications.service'
 
 const LOW_BALANCE_THRESHOLD = 10000
+// VM suspended when balance <= -(priceHourly * GRACE_HOURS)
+const GRACE_HOURS = 2
+// Suspended VM auto-deleted after this many days
+const GRACE_PERIOD_DAYS = 7
 
 @Injectable()
 export class BillingService {
@@ -12,20 +17,23 @@ export class BillingService {
 
   constructor(
     private prisma: PrismaService,
+    private proxmox: ProxmoxService,
     private mikrotik: MikrotikService,
     private notifications: NotificationsService,
   ) {}
 
-  async getTransactions(userId: string, page = 1, limit = 20) {
+  async getTransactions(userId: string, page = 1, limit = 20, type?: string) {
     const skip = (page - 1) * limit
+    const where: any = { userId }
+    if (type) where.type = type
     const [items, total] = await Promise.all([
       this.prisma.transaction.findMany({
-        where: { userId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      this.prisma.transaction.count({ where: { userId } }),
+      this.prisma.transaction.count({ where }),
     ])
     return { items, total, page, limit }
   }
@@ -43,7 +51,7 @@ export class BillingService {
     this.logger.log('Running hourly billing...')
     const runningVms = await this.prisma.vm.findMany({
       where: { status: 'running' },
-      include: { package: true, user: true },
+      include: { package: true, user: true, natPortForwards: true },
     })
 
     const now = new Date()
@@ -52,12 +60,17 @@ export class BillingService {
     for (const vm of runningVms) {
       const charge = Number(vm.package.priceHourly)
       const userBalance = Number(vm.user.balance)
+      // Debt limit: suspend when balance already <= -(charge * GRACE_HOURS)
+      const debtLimit = -(charge * GRACE_HOURS)
 
-      if (userBalance < charge) {
+      // Already past grace period — suspend without charging more
+      if (userBalance <= debtLimit) {
         await this.handleInsufficientBalance(vm)
         continue
       }
 
+      // Charge — balance may go negative (grace period)
+      const newBalance = userBalance - charge
       await this.prisma.$transaction([
         this.prisma.user.update({
           where: { id: vm.userId },
@@ -74,41 +87,64 @@ export class BillingService {
         }),
       ])
 
-      const newBalance = userBalance - charge
-      if (newBalance < LOW_BALANCE_THRESHOLD) {
-        await this.notifications.sendLowBalanceWarning(vm.user.email, newBalance)
+      // After charging, check if now past debt limit
+      if (newBalance <= debtLimit) {
+        await this.handleInsufficientBalance(vm)
+      } else if (newBalance < 0) {
+        // In grace period — warn user
+        await this.notifications.sendLowBalanceWarning(vm.user.email, newBalance).catch(() => {})
+        this.logger.warn(`VM ${vm.displayId} in grace period — balance: ${newBalance}`)
+      } else if (newBalance < LOW_BALANCE_THRESHOLD) {
+        await this.notifications.sendLowBalanceWarning(vm.user.email, newBalance).catch(() => {})
       }
     }
 
     this.logger.log(`Billing done for ${runningVms.length} VMs`)
   }
 
+  // Runs at 02:00 daily — delete VMs suspended past grace period
   @Cron('0 2 * * *')
   async checkExpiredVms() {
-    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
-    const suspendedVms = await this.prisma.vm.findMany({
+    const cutoff = new Date(Date.now() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000)
+    const expiredVms = await this.prisma.vm.findMany({
       where: {
         status: 'suspended',
-        updatedAt: { lte: threeDaysAgo },
+        expiresAt: { lte: cutoff },
       },
       include: { natPortForwards: true },
     })
 
-    for (const vm of suspendedVms) {
-      await this.prisma.vm.update({ where: { id: vm.id }, data: { status: 'deleted' } })
+    for (const vm of expiredVms) {
+      this.logger.log(`Auto-deleting expired VM ${vm.displayId}`)
+      if (vm.proxmoxVmid && vm.proxmoxNode) {
+        await this.proxmox.stopVm(vm.proxmoxNode, vm.proxmoxVmid).catch(() => {})
+        await this.proxmox.deleteVm(vm.proxmoxNode, vm.proxmoxVmid).catch((e) => {
+          this.logger.warn(`Proxmox delete failed for ${vm.displayId}: ${e.message}`)
+        })
+      }
       for (const pf of vm.natPortForwards) {
         await this.mikrotik.removeSshForward(pf.externalPort).catch(() => {})
       }
-      this.logger.log(`VM ${vm.displayId} deleted after grace period`)
+      await this.prisma.vm.update({ where: { id: vm.id }, data: { status: 'deleted' } })
+      this.logger.log(`VM ${vm.displayId} auto-deleted after ${GRACE_PERIOD_DAYS}-day grace`)
     }
   }
 
   private async handleInsufficientBalance(vm: any) {
-    await this.prisma.vm.update({ where: { id: vm.id }, data: { status: 'suspended' } })
+    if (vm.proxmoxVmid && vm.proxmoxNode) {
+      await this.proxmox.stopVm(vm.proxmoxNode, vm.proxmoxVmid).catch((e) => {
+        this.logger.warn(`Could not stop VM ${vm.displayId}: ${e.message}`)
+      })
+    }
     for (const pf of vm.natPortForwards ?? []) {
       await this.mikrotik.disableSshForward(pf.externalPort).catch(() => {})
     }
-    await this.notifications.sendVmSuspended(vm.user.email, vm.hostname)
-    this.logger.warn(`VM ${vm.displayId} suspended — insufficient balance`)
+    const expiresAt = new Date(Date.now() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000)
+    await this.prisma.vm.update({
+      where: { id: vm.id },
+      data: { status: 'suspended', expiresAt },
+    })
+    await this.notifications.sendVmSuspended(vm.user.email, vm.hostname).catch(() => {})
+    this.logger.warn(`VM ${vm.displayId} suspended — balance exceeded ${GRACE_HOURS}h debt limit`)
   }
 }

@@ -15,6 +15,16 @@ export function formatDate(date: string | Date) {
   }).format(new Date(date))
 }
 
+export function formatOsName(osTemplate: string | null | undefined): string {
+  if (!osTemplate) return '—'
+  // ISO path: e.g. local:iso/debian-13.5.0-amd64-netinst.iso
+  if (osTemplate.includes('/')) {
+    const filename = osTemplate.split('/').pop() ?? osTemplate
+    return filename.replace(/\.iso$/i, '').replace(/-/g, ' ')
+  }
+  return osTemplate
+}
+
 export function timeAgo(date: string | Date) {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
   if (seconds < 60) return `${seconds}d lalu`

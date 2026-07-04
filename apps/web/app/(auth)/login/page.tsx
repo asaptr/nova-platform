@@ -4,12 +4,15 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { Cloud } from 'lucide-react'
+import { ThemeToggle } from '@/components/layout/theme-toggle'
+import { useBrand } from '@/hooks/use-brand'
 
 export default function LoginPage() {
   const router = useRouter()
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const brand = useBrand()
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -18,7 +21,7 @@ export default function LoginPage() {
       const { data } = await api.post('/auth/login', form)
       localStorage.setItem('access_token', data.accessToken)
       localStorage.setItem('refresh_token', data.refreshToken)
-      router.push('/dashboard')
+      router.push('/vms')
     } catch (e: any) {
       setError(e.response?.data?.message ?? 'Login gagal')
     } finally {
@@ -28,12 +31,15 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-2">
           <div className="p-3 rounded-2xl bg-accent/10">
             <Cloud size={28} className="text-accent" />
           </div>
-          <h1 className="text-2xl font-bold">Langit Node</h1>
+          <h1 className="text-2xl font-bold">{brand.name || 'NOVA'}</h1>
           <p className="text-sm text-muted">Masuk ke akun Anda</p>
         </div>
 

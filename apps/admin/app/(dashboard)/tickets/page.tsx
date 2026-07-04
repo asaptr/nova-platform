@@ -5,10 +5,10 @@ import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 
 const priorityColor: Record<string, string> = {
-  low: 'bg-gray-100 text-gray-600 dark:bg-gray-800',
-  medium: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
-  high: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
-  urgent: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
+  normal: 'bg-gray-100 text-gray-600 dark:bg-gray-800',
+  minor: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+  major: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+  critical: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
 }
 
 export default function AdminTicketsPage() {
@@ -34,14 +34,22 @@ export default function AdminTicketsPage() {
         <h1 className="text-2xl font-bold">Tiket Dukungan ({total})</h1>
       </div>
 
-      <div className="flex gap-2">
-        {['', 'open', 'in_progress', 'resolved', 'closed'].map(s => (
-          <button key={s} onClick={() => setStatusFilter(s)}
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { value: '', label: 'Semua' },
+          { value: 'open', label: 'Open' },
+          { value: 'in_progress', label: 'Diproses' },
+          { value: 'waiting_admin', label: 'Tunggu Admin' },
+          { value: 'waiting_user', label: 'Tunggu User' },
+          { value: 'resolved', label: 'Resolved' },
+          { value: 'closed', label: 'Closed' },
+        ].map(({ value, label }) => (
+          <button key={value} onClick={() => setStatusFilter(value)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              statusFilter === s ? 'bg-accent text-white' : 'border border-border text-muted hover:text-primary'
+              statusFilter === value ? 'bg-accent text-white' : 'border border-border text-muted hover:text-primary'
             }`}
           >
-            {s === '' ? 'Semua' : s.replace('_', ' ')}
+            {label}
           </button>
         ))}
       </div>

@@ -14,6 +14,8 @@ import { AuditModule } from './audit/audit.module'
 import { NotificationsModule } from './notifications/notifications.module'
 import { TicketsModule } from './tickets/tickets.module'
 import { AdminModule } from './admin/admin.module'
+import { VncProxyModule } from './vnc/vnc-proxy.module'
+import { SystemConfigModule } from './system-config/system-config.module'
 
 @Module({
   imports: [
@@ -32,6 +34,8 @@ import { AdminModule } from './admin/admin.module'
     PaymentModule,
     TicketsModule,
     AdminModule,
+    VncProxyModule,
+    SystemConfigModule,
   ],
 })
 export class AppModule {}

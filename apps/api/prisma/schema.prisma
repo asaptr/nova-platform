@@ -167,13 +167,33 @@ model Ticket {
   messages TicketMessage[]
 }
 
+model VmTemplate {
+  id             String   @id @default(uuid())
+  name           String
+  description    String?
+  osFamily       String   @default("linux")
+  proxmoxValue   String
+  templateType   String   @default("clone")
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+}
+
 model TicketMessage {
-  id         String   @id @default(uuid())
-  ticketId   String
-  senderType String
-  senderId   String
-  message    String
-  createdAt  DateTime @default(now())
+  id            String   @id @default(uuid())
+  ticketId      String
+  senderType    String
+  senderId      String
+  message       String
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id])
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+  updatedBy String?
 }

@@ -4,16 +4,18 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
-import { ArrowLeft, Send } from 'lucide-react'
+import { ArrowLeft, Send, Paperclip, X } from 'lucide-react'
 
 export default function AdminTicketDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [ticket, setTicket] = useState<any>(null)
   const [reply, setReply] = useState('')
+  const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [newStatus, setNewStatus] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   async function load() {
     const { data } = await api.get(`/admin/tickets/${id}`)
@@ -26,16 +28,23 @@ export default function AdminTicketDetailPage() {
 
   async function sendReply(e: React.FormEvent) {
     e.preventDefault()
-    if (!reply.trim()) return
+    if (!reply.trim() && !file) return
     setSending(true)
-    await api.post(`/admin/tickets/${id}/reply`, { message: reply })
-    setReply('')
-    await load()
-    setSending(false)
+    try {
+      const formData = new FormData()
+      formData.append('message', reply)
+      if (file) formData.append('attachment', file)
+      // Do NOT set Content-Type manually — axios sets multipart/form-data with correct boundary
+      await api.post(`/admin/tickets/${id}/reply`, formData)
+      setReply(''); setFile(null)
+      await load()
+    } finally {
+      setSending(false)
+    }
   }
 
   async function updateStatus() {
-    await api.patch(`/admin/tickets/${id}/status`, { status: newStatus })
+    await api.patch(`/admin/tickets/${id}`, { status: newStatus })
     setTicket((t: any) => ({ ...t, status: newStatus }))
   }
 
@@ -43,6 +52,7 @@ export default function AdminTicketDetailPage() {
   if (!ticket) return <div className="text-sm text-red-500">Tiket tidak ditemukan.</div>
 
   const adminEmail = typeof window !== 'undefined' ? localStorage.getItem('admin_email') : ''
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') ?? 'http://localhost:3000'
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -56,14 +66,20 @@ export default function AdminTicketDetailPage() {
         </div>
       </div>
 
-      {/* Status control */}
-      <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+      <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3 flex-wrap">
         <label className="text-sm text-muted">Status:</label>
         <select value={newStatus} onChange={e => setNewStatus(e.target.value)}
           className="border border-border rounded-lg px-3 py-1.5 text-sm bg-background outline-none focus:border-accent"
         >
-          {['open', 'in_progress', 'resolved', 'closed'].map(s => (
-            <option key={s} value={s}>{s.replace('_', ' ')}</option>
+          {[
+            { value: 'open', label: 'Open' },
+            { value: 'in_progress', label: 'Diproses' },
+            { value: 'waiting_admin', label: 'Menunggu Admin' },
+            { value: 'waiting_user', label: 'Menunggu User' },
+            { value: 'resolved', label: 'Resolved' },
+            { value: 'closed', label: 'Closed' },
+          ].map(s => (
+            <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
         <button onClick={updateStatus}
@@ -72,25 +88,30 @@ export default function AdminTicketDetailPage() {
           Simpan
         </button>
         <span className={`ml-auto text-xs px-2 py-0.5 rounded font-medium ${
-          ticket.priority === 'urgent' ? 'bg-red-50 text-red-700' :
-          ticket.priority === 'high' ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-600'
+          ticket.priority === 'critical' ? 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' :
+          ticket.priority === 'major' ? 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300' :
+          ticket.priority === 'minor' ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' :
+          'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
         }`}>{ticket.priority}</span>
       </div>
 
-      {/* Messages */}
       <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
         {ticket.messages?.map((m: any) => {
           const isAdmin = m.senderType === 'admin'
           return (
             <div key={m.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] rounded-xl px-4 py-3 text-sm ${
-                isAdmin
-                  ? 'bg-accent text-white rounded-br-none'
-                  : 'bg-card border border-border rounded-bl-none'
+              <div className={`max-w-[80%] rounded-xl px-4 py-3 text-sm space-y-2 ${
+                isAdmin ? 'bg-accent text-white rounded-br-none' : 'bg-card border border-border rounded-bl-none'
               }`}>
-                <p className="whitespace-pre-wrap">{m.message}</p>
-                <p className={`text-xs mt-1.5 ${isAdmin ? 'text-white/70' : 'text-muted'}`}>
-                  {isAdmin ? (m.adminUser?.email ?? adminEmail) : ticket.user?.email} · {formatDate(m.createdAt)}
+                {m.message && <p className="whitespace-pre-wrap">{m.message}</p>}
+                {m.attachmentUrl && (
+                  <img src={`${apiBase}${m.attachmentUrl}`} alt="attachment"
+                    className="max-w-xs rounded-lg border border-white/20 cursor-pointer"
+                    onClick={() => window.open(`${apiBase}${m.attachmentUrl}`, '_blank')}
+                  />
+                )}
+                <p className={`text-xs ${isAdmin ? 'text-white/70' : 'text-muted'}`}>
+                  {isAdmin ? (adminEmail ?? 'Admin') : ticket.user?.email} · {formatDate(m.createdAt)}
                 </p>
               </div>
             </div>
@@ -99,7 +120,6 @@ export default function AdminTicketDetailPage() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Reply box */}
       {ticket.status !== 'closed' && (
         <form onSubmit={sendReply} className="bg-card border border-border rounded-xl p-4 space-y-3">
           <textarea
@@ -108,8 +128,23 @@ export default function AdminTicketDetailPage() {
             rows={3}
             className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent resize-none"
           />
-          <div className="flex justify-end">
-            <button type="submit" disabled={!reply.trim() || sending}
+          {file && (
+            <div className="flex items-center gap-2 text-sm text-muted bg-background border border-border rounded-lg px-3 py-2">
+              <Paperclip size={13} />
+              <span className="flex-1 truncate">{file.name}</span>
+              <button type="button" onClick={() => setFile(null)}><X size={13} /></button>
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 text-sm text-muted hover:text-primary transition-colors"
+            >
+              <Paperclip size={14} /> Lampiran
+            </button>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+              onChange={e => setFile(e.target.files?.[0] ?? null)}
+            />
+            <button type="submit" disabled={(!reply.trim() && !file) || sending}
               className="flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-colors"
             >
               <Send size={14} /> {sending ? 'Mengirim...' : 'Kirim Balasan'}

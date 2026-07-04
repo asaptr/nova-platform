@@ -1,27 +1,31 @@
-# Langit Node
+# NOVA — Node Orchestration & Virtualization Architecture
 
 Self-service IaaS VPS platform berbasis Proxmox. User bisa deploy, manage, dan bayar VM sendiri lewat portal web — mirip DigitalOcean/Hetzner, tapi jalan di atas cluster Proxmox milik sendiri.
+
+> **Versi saat ini**: NOVA Andromeda v1.0
+
+---
 
 ## Stack
 
 | Lapisan | Teknologi |
 |---|---|
-| Monorepo | Turborepo + pnpm workspaces |
+| Monorepo | Turborepo + pnpm v11 workspaces |
 | Backend | NestJS + Prisma + PostgreSQL |
 | Queue | BullMQ + Redis |
 | Frontend | Next.js 14 App Router + Tailwind CSS |
-| Hypervisor | Proxmox VE (API Token auth) |
-| NAT networking | Mikrotik RouterOS API + dnsmasq DHCP reservation |
+| Hypervisor | Proxmox VE 8.x (API Token auth) |
+| NAT networking | MikroTik RouterOS API + dnsmasq DHCP |
 | Payment | Midtrans (webhook) |
 | Email | SMTP (nodemailer) |
-| Deployment | Docker Compose + Nginx reverse proxy |
+| Deployment | LXC Container + PM2 + Nginx |
 
 ---
 
 ## Struktur Folder
 
 ```
-langit-node/
+nova/
 ├── apps/
 │   ├── api/          # NestJS backend (port 3000)
 │   ├── web/          # User portal Next.js (port 3001)
@@ -30,194 +34,106 @@ langit-node/
 │   ├── types/        # Shared TypeScript interfaces
 │   ├── ui/           # Shared React components
 │   └── utils/        # formatRupiah, formatDate, dll
-├── nginx/
-│   └── nginx.conf
-└── docker-compose.yml
+├── ecosystem.config.js   # PM2 process config
+├── SETUP.md              # Fresh install guide (Proxmox → deploy)
+└── proxmox-reseller-platform.md  # Blueprint arsitektur lengkap
 ```
 
 ---
 
-## Cara Running
+## Subdomain & Routing
+
+| Subdomain | Tujuan | Port |
+|---|---|---|
+| `app.yourdomain.com` | User portal | 3001 |
+| `admin.yourdomain.com` | Admin panel | 3002 |
+| `api.yourdomain.com` | REST API | 3000 |
+| `status.yourdomain.com` | Status page | — |
+| `docs.yourdomain.com` | Dokumentasi | — |
+
+---
+
+## Development — Cara Running
 
 ### Prasyarat
 
 - Node.js >= 20
-- pnpm >= 9 (`npm install -g pnpm`)
-- PostgreSQL 16 (atau lewat Docker)
-- Redis 7 (atau lewat Docker)
-- Proxmox VE yang sudah dikonfigurasi (lihat bagian Proxmox Setup)
-- Mikrotik RouterOS dengan API aktif (untuk VM NAT)
-
----
+- pnpm >= 11 (`npm install -g pnpm@11`)
+- PostgreSQL 16
+- Redis 7
+- Proxmox VE yang sudah dikonfigurasi (lihat `SETUP.md`)
+- MikroTik RouterOS dengan API aktif
 
 ### 1. Clone & Install
 
 ```bash
-cd "/Applications/XAMPP/xamppfiles/htdocs/Workspace/Langit Node"
+git clone <repo-url> nova
+cd nova
 pnpm install
 ```
 
----
-
 ### 2. Setup Environment Variables
 
-**Backend API** — salin dan isi nilai yang sesuai:
-
 ```bash
-cp apps/api/.env apps/api/.env.local
+cp apps/api/.env apps/api/.env.backup
 ```
 
 Edit `apps/api/.env` — bagian yang wajib diganti:
 
 ```env
 # Database
-DATABASE_URL="postgresql://langitnode:langitnode_dev@localhost:5432/langitnode"
+DATABASE_URL="postgresql://nova:password@localhost:5432/nova"
 
-# JWT — ganti dengan random string panjang!
-JWT_SECRET="random-string-minimal-32-karakter-xxxx"
+# JWT — ganti dengan random string kuat!
+JWT_SECRET="random-string-minimal-32-karakter"
 ADMIN_JWT_SECRET="random-string-berbeda-dari-jwt-secret"
 
-# Proxmox — sesuaikan dengan server kamu
+# Proxmox
 PROXMOX_HOST="10.10.10.250"
-PROXMOX_TOKEN_ID="langitnode@pve!langitnode-token"
-PROXMOX_TOKEN_SECRET="uuid-token-dari-proxmox"
-PROXMOX_VERIFY_SSL="false"   # true jika pakai sertifikat valid
+PROXMOX_TOKEN_ID="nova@pve!nova-token"
+PROXMOX_TOKEN_SECRET="uuid-token"
+PROXMOX_NODE="pve"
+PROXMOX_VERIFY_SSL="false"
 
-# Mikrotik (untuk NAT VM)
+# MikroTik (untuk NAT VM)
 MIKROTIK_HOST="10.10.10.1"
-MIKROTIK_USER="langitnode-api"
+MIKROTIK_USER="nova-api"
 MIKROTIK_PASS="password-user-mikrotik"
 
+# NAT
+NAT_BRIDGE="vmbr1"
+NAT_GATEWAY="10.20.0.1"
+NAT_PUBLIC_IP="1.2.3.4"
+
 # Midtrans
-MIDTRANS_SERVER_KEY="SB-Mid-server-xxxx"   # SB = Sandbox
+MIDTRANS_SERVER_KEY="SB-Mid-server-xxxx"
 MIDTRANS_IS_PRODUCTION="false"
 
 # SMTP
 SMTP_HOST="smtp.gmail.com"
-SMTP_USER="noreply@langitnode.id"
+SMTP_USER="noreply@yourdomain.com"
 SMTP_PASS="app-password-gmail"
+EMAIL_FROM="NOVA <noreply@yourdomain.com>"
 ```
 
-**User portal:**
+Frontend env:
 
 ```bash
-# apps/web/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+echo 'NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1' > apps/web/.env.local
+echo 'NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1' > apps/admin/.env.local
 ```
 
-**Admin panel:**
+### 3. Setup Database
 
 ```bash
-# apps/admin/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:3000/api/v1
+# Push schema (pakai ini, bukan migrate dev — non-interactive)
+pnpm db:push
+
+# Seed data awal: superadmin + default system config
+pnpm db:seed
 ```
 
----
-
-### 3. Jalankan Database & Redis (via Docker)
-
-```bash
-# Hanya jalankan postgres + redis, bukan seluruh stack
-docker compose up postgres redis -d
-```
-
-Tunggu sampai healthy:
-
-```bash
-docker compose ps
-```
-
----
-
-### 4. Migrasi Database
-
-```bash
-pnpm db:migrate
-```
-
-Kalau mau reset dari awal:
-
-```bash
-pnpm db:push      # push schema tanpa migration file
-# atau
-cd apps/api && npx prisma migrate reset
-```
-
----
-
-### 5. Seed Data Awal (superadmin + paket)
-
-Buat file `apps/api/prisma/seed.ts`:
-
-```typescript
-import { PrismaClient } from '@prisma/client'
-import * as bcrypt from 'bcrypt'
-
-const prisma = new PrismaClient()
-
-async function main() {
-  // Superadmin
-  await prisma.adminUser.upsert({
-    where: { email: 'superadmin@langitnode.id' },
-    update: {},
-    create: {
-      email: 'superadmin@langitnode.id',
-      passwordHash: await bcrypt.hash('Admin@123!', 12),
-      role: 'superadmin',
-    },
-  })
-
-  // Paket NAT
-  await prisma.package.createMany({
-    skipDuplicates: true,
-    data: [
-      {
-        name: 'Nano NAT',
-        cpu: 1, ram: 512, disk: 10,
-        pricePerHour: 50,
-        ipType: 'nat',
-        osTemplates: ['ubuntu-22.04-cloudinit', 'debian-12-cloudinit'],
-      },
-      {
-        name: 'Micro NAT',
-        cpu: 1, ram: 1024, disk: 20,
-        pricePerHour: 100,
-        ipType: 'nat',
-        osTemplates: ['ubuntu-22.04-cloudinit', 'debian-12-cloudinit'],
-      },
-      {
-        name: 'Small Public',
-        cpu: 2, ram: 2048, disk: 40,
-        pricePerHour: 300,
-        ipType: 'public',
-        osTemplates: ['ubuntu-22.04-cloudinit', 'debian-12-cloudinit'],
-      },
-    ],
-  })
-
-  console.log('Seed selesai.')
-}
-
-main().catch(console.error).finally(() => prisma.$disconnect())
-```
-
-Tambahkan ke `apps/api/package.json`:
-
-```json
-"prisma": {
-  "seed": "ts-node prisma/seed.ts"
-}
-```
-
-Jalankan:
-
-```bash
-cd apps/api && npx prisma db seed
-```
-
----
-
-### 6. Development Mode (semua app sekaligus)
+### 4. Jalankan Development Mode
 
 ```bash
 pnpm dev
@@ -234,99 +150,80 @@ Turborepo menjalankan ketiga app secara paralel:
 Atau jalankan individual:
 
 ```bash
-# Hanya API
 pnpm --filter=api start:dev
-
-# Hanya web
 pnpm --filter=web dev
-
-# Hanya admin
 pnpm --filter=admin dev
 ```
 
----
-
-### 7. Prisma Studio (GUI database)
+### 5. Prisma Studio (GUI database)
 
 ```bash
-pnpm db:studio
-# Buka http://localhost:5555
+pnpm db:studio   # buka http://localhost:5555
 ```
 
 ---
 
-## Production — Docker Compose
+## Production — Deployment
 
-### Build & Deploy
+Lihat **[SETUP.md](./SETUP.md)** untuk panduan lengkap fresh install dari awal (Proxmox → LXC → deploy).
+
+Ringkasan deployment architecture:
+
+```
+Proxmox Host
+├── LXC nova-app (CT 100)
+│   ├── PM2
+│   │   ├── nova-api      (NestJS, port 3000)
+│   │   ├── nova-web      (Next.js, port 3001)
+│   │   └── nova-admin    (Next.js, port 3002)
+│   ├── Nginx             (reverse proxy + SSL termination)
+│   ├── PostgreSQL 16     (database)
+│   └── Redis 7           (cache + BullMQ queue)
+├── KVM VMs               (VM user yang di-deploy)
+└── vmbr1 bridge          (NAT subnet 10.20.0.0/24)
+```
+
+Update production:
 
 ```bash
-# Build semua image
-docker compose build
-
-# Jalankan seluruh stack
-docker compose up -d
-
-# Cek log
-docker compose logs -f api
-docker compose logs -f web
+cd /opt/nova
+git pull origin main
+pnpm install && pnpm build
+pnpm db:push          # jika ada perubahan schema
+pm2 restart all
 ```
-
-### Urutan startup otomatis
-
-```
-postgres → redis → api → web → admin → nginx
-```
-
-### URL Production
-
-| Service | Port/Domain |
-|---|---|
-| User portal | http://langitnode.id |
-| Admin panel | http://admin.langitnode.id |
-| API (internal) | http://api:3000 (lewat nginx) |
 
 ---
 
 ## Proxmox Setup
 
-### 1. Buat API Token
-
-Di Proxmox UI: **Datacenter → API Tokens → Add**
-
-```
-User:  langitnode@pve
-Token: langitnode-token
-Privilege Separation: NO  ← penting, butuh akses penuh
-```
-
-Salin token secret ke `.env`:
-
-```env
-PROXMOX_TOKEN_ID="langitnode@pve!langitnode-token"
-PROXMOX_TOKEN_SECRET="uuid-yang-muncul-saat-buat"
-```
-
-### 2. Template Cloud-Init
-
-Upload template ke Proxmox (jalankan di host PVE):
+### Buat API Token (via CLI — satu kali setup)
 
 ```bash
-# Contoh Ubuntu 22.04
-wget https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
-qm create 9000 --name ubuntu-22.04-cloudinit --memory 1024 --net0 virtio,bridge=vmbr0
-qm importdisk 9000 jammy-server-cloudimg-amd64.img local-lvm
-qm set 9000 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9000-disk-0
-qm set 9000 --ide2 local-lvm:cloudinit --boot c --bootdisk scsi0
-qm set 9000 --serial0 socket --vga serial0
-qm set 9000 --agent enabled=1   # ← WAJIB: QEMU guest agent
-qm template 9000
+pveum user add nova@pve
+pveum role add NOVARole -privs \
+  "VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit \
+   VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network \
+   VM.Config.Options VM.Console VM.Monitor VM.PowerMgmt VM.Snapshot \
+   Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit \
+   SDN.Use Sys.Audit"
+pveum aclmod / -user nova@pve -role NOVARole
+pveum user token add nova@pve nova-token --privsep=0
 ```
 
-**Penting:** Pastikan `qemu-guest-agent` sudah terinstall di image, karena API pakai ini untuk set password root dan hostname.
+Salin token secret yang muncul ke `.env` sebagai `PROXMOX_TOKEN_SECRET`.
 
-### 3. Jaringan NAT
+### Template Cloud-Init
 
-Tambahkan bridge `vmbr1` di `/etc/network/interfaces` pada host PVE:
+Template VM **wajib** include `qemu-guest-agent` — dipakai untuk set password root dan hostname via Proxmox API. Template menggunakan `vga: std` (bukan serial0).
+
+NOVA secara otomatis memperbaiki VGA config lama (`serial0` → `std`) saat VM di-start.
+
+Lihat `SETUP.md` bagian 1.5 untuk langkah pembuatan template lengkap.
+
+### Bridge vmbr1 untuk NAT
+
+Di `/etc/network/interfaces` Proxmox host:
 
 ```
 auto vmbr1
@@ -335,124 +232,45 @@ iface vmbr1 inet static
     bridge-ports none
     bridge-stp off
     bridge-fd 0
-    post-up echo 1 > /proc/sys/net/ipv4/ip_forward
-    post-up iptables -t nat -A POSTROUTING -s 10.20.0.0/24 -o vmbr0 -j MASQUERADE
+    post-up   echo 1 > /proc/sys/net/ipv4/ip_forward
+    post-up   iptables -t nat -A POSTROUTING -s 10.20.0.0/24 -o vmbr0 -j MASQUERADE
     post-down iptables -t nat -D POSTROUTING -s 10.20.0.0/24 -o vmbr0 -j MASQUERADE
 ```
 
-### 4. dnsmasq untuk DHCP Reservation
+---
 
-Install dan konfigurasi di host PVE (atau server terpisah di jaringan yang sama):
+## Billing System
 
-```bash
-apt install dnsmasq
+NOVA menggunakan model **pay-as-you-go prepaid** tanpa deposit:
 
-# /etc/dnsmasq.conf
-interface=vmbr1
-bind-interfaces
-dhcp-range=10.20.0.2,10.20.0.254,12h
-conf-dir=/etc/dnsmasq.d/,*.conf
-```
+| Kondisi | Aksi sistem |
+|---|---|
+| Saldo > 0 dan VM running | Potong saldo setiap jam sesuai `priceHourly` |
+| Saldo minus tapi dalam grace period (< 2 jam usage) | Biarkan VM tetap running, kirim warning |
+| Saldo melewati batas grace — minus lebih dari `priceHourly × 2` | Suspend VM otomatis + disable MikroTik NAT |
+| VM suspended selama 7 hari tanpa topup | Hapus VM permanen dari Proxmox |
+| User mau nyalakan VM yang suspended | Harus topup sampai saldo ≥ 0 terlebih dahulu |
 
-API akan otomatis menulis file reservation ke `/etc/dnsmasq.d/` dan reload dnsmasq saat VM dibuat. Pastikan user yang menjalankan API punya akses `sudo systemctl reload dnsmasq` tanpa password:
-
-```bash
-# /etc/sudoers.d/langitnode-dnsmasq
-langitnode ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload dnsmasq
-```
+Tidak ada deposit saat membuat VM baru. Syarat buat VM: saldo ≥ 0.
 
 ---
 
-## Mikrotik Setup (untuk NAT VM)
+## System Settings
 
-### Aktifkan API
+Konfigurasi platform tersimpan di database (`SystemConfig` table) dan bisa diubah via **Admin Panel → Sistem → Pengaturan Sistem** (superadmin only).
 
-Di WinBox: **IP → Services → api** → enable, set port 8728.
+| Seksi | Setting yang tersedia |
+|---|---|
+| Branding | Nama platform, tagline, codename versi, nomor versi, logo URL |
+| Domain | Semua subdomain (app, admin, api, landing, status, docs, changelog) |
+| Proxmox | Host, port, node, token ID, token secret — butuh restart API jika diubah |
+| MikroTik & NAT | Host, user, password, bridge, gateway, public IP — butuh restart API |
 
-### Buat user terbatas
+Setting yang **tidak ada di UI** (karena security-critical — hanya di `.env`):
+- `JWT_SECRET` dan `ADMIN_JWT_SECRET`
+- `DATABASE_URL`
 
-```
-/user add name=langitnode-api password=xxx group=write
-```
-
-API akan otomatis menambah/menghapus rule `/ip firewall nat` untuk port forwarding SSH (port `220XX` → `22` ke IP internal VM).
-
----
-
-## Midtrans Setup
-
-1. Daftar di https://midtrans.com
-2. Aktifkan Snap API
-3. Salin **Server Key** dan **Client Key** dari dashboard
-4. Set webhook URL di Midtrans dashboard:
-   ```
-   https://langitnode.id/api/v1/payment/webhook
-   ```
-5. Ganti `.env` ke production key saat siap live:
-   ```env
-   MIDTRANS_IS_PRODUCTION="true"
-   MIDTRANS_SERVER_KEY="Mid-server-xxxx"  # tanpa SB-
-   ```
-
----
-
-## Perintah Berguna
-
-```bash
-# Lihat semua log sekaligus
-docker compose logs -f
-
-# Restart satu service
-docker compose restart api
-
-# Masuk ke container API
-docker compose exec api sh
-
-# Run migration di container
-docker compose exec api npx prisma migrate deploy
-
-# Buka Prisma Studio dari luar container
-pnpm db:studio
-
-# Build ulang satu image
-docker compose build api --no-cache
-```
-
----
-
-## Variabel Environment Lengkap
-
-| Variable | Keterangan | Contoh |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@host:5432/db` |
-| `JWT_SECRET` | Secret untuk token user (min 32 char) | random string |
-| `JWT_EXPIRES_IN` | Masa berlaku access token | `15m` |
-| `JWT_REFRESH_EXPIRES_IN` | Masa berlaku refresh token | `7d` |
-| `ADMIN_JWT_SECRET` | Secret untuk token admin (beda dari user) | random string |
-| `REDIS_HOST` | Redis host | `localhost` |
-| `REDIS_PORT` | Redis port | `6379` |
-| `PROXMOX_HOST` | IP/hostname Proxmox | `10.10.10.250` |
-| `PROXMOX_PORT` | Port Proxmox API | `8006` |
-| `PROXMOX_TOKEN_ID` | API token ID | `langitnode@pve!token-name` |
-| `PROXMOX_TOKEN_SECRET` | API token secret (UUID) | `b6665bf4-...` |
-| `PROXMOX_NODE` | Nama node default | `pve` |
-| `PROXMOX_VERIFY_SSL` | Verifikasi SSL cert | `false` |
-| `MIKROTIK_HOST` | IP Mikrotik | `10.10.10.1` |
-| `MIKROTIK_USER` | User API Mikrotik | `langitnode-api` |
-| `MIKROTIK_PASS` | Password user Mikrotik | — |
-| `NAT_BRIDGE` | Bridge untuk VM NAT | `vmbr1` |
-| `NAT_GATEWAY` | Gateway subnet NAT | `10.20.0.1` |
-| `PUBLIC_BRIDGE` | Bridge untuk VM Public IP | `vmbr0` |
-| `MIDTRANS_SERVER_KEY` | Server key Midtrans | `SB-Mid-server-xxxx` |
-| `MIDTRANS_CLIENT_KEY` | Client key Midtrans | `SB-Mid-client-xxxx` |
-| `MIDTRANS_IS_PRODUCTION` | Mode produksi Midtrans | `false` |
-| `SMTP_HOST` | SMTP server | `smtp.gmail.com` |
-| `SMTP_PORT` | SMTP port | `587` |
-| `SMTP_USER` | Email pengirim | `noreply@langitnode.id` |
-| `SMTP_PASS` | Password / app password | — |
-| `EMAIL_FROM` | Nama + email pengirim | `Langit Node <noreply@...>` |
-| `FRONTEND_URL` | URL user portal (untuk CORS) | `http://localhost:3001` |
-| `ADMIN_URL` | URL admin panel (untuk CORS) | `http://localhost:3002` |
+Brand name ditampilkan dinamis di sidebar kedua portal via `GET /api/v1/brand`.
 
 ---
 
@@ -463,20 +281,20 @@ User klik "Deploy VM"
     │
     ▼
 POST /api/v1/vms
-    │  (cek saldo, generate displayId atomic, deduct balance)
+    │  cek saldo >= 0, generate displayId atomic (ln-nat-0001)
     │
     ▼
 BullMQ queue: vm-provision
     │
     ├─ Alokasi IP NAT (SELECT FOR UPDATE, race-free)
-    ├─ Proxmox: createVm dari template cloud-init
+    ├─ Proxmox: clone VM dari template (vga: std)
     ├─ dnsmasq: tambah DHCP reservation (MAC → IP fixed)
-    ├─ Mikrotik: tambah dst-nat rule (port 220XX → VM:22)
-    ├─ Proxmox: startVm
+    ├─ MikroTik: tambah dst-nat rule (port 220XX → VM:22)
+    ├─ Proxmox: startVm + waitForTask
     ├─ Tunggu QEMU guest agent ready
     ├─ Set root password via guest agent
     ├─ Set hostname via guest agent
-    └─ Update status DB → running, kirim email
+    └─ Update status DB → running + kirim email
 ```
 
 ## Arsitektur Flow: Billing
@@ -484,11 +302,110 @@ BullMQ queue: vm-provision
 ```
 @Cron setiap jam
     │
-    ├─ Ambil semua VM running
-    ├─ Deduct saldo user sesuai harga paket/jam
-    ├─ Jika saldo < threshold → kirim email peringatan
-    └─ Jika saldo < 0 → suspend VM + disable Mikrotik forward
+    ├─ Ambil semua VM status=running
+    ├─ Potong saldo sesuai priceHourly
+    ├─ Jika saldo <= -(priceHourly × 2) → suspend VM
+    │   ├─ Proxmox: stopVm (force, wait for completion)
+    │   ├─ MikroTik: disable NAT ports
+    │   └─ DB: status=suspended, expiresAt=now+7hari
+    └─ Jika saldo < 0 tapi masih dalam grace → kirim email warning
 
 @Cron setiap hari jam 02:00
-    └─ Hapus VM yang sudah 3 hari sejak suspend (grace period)
+    └─ Cari VM status=suspended AND expiresAt <= now
+        ├─ Proxmox: stopVm + deleteVm (purge disk)
+        ├─ MikroTik: hapus NAT ports
+        └─ DB: status=deleted
+```
+
+---
+
+## MikroTik Setup
+
+### Aktifkan API
+
+Di WinBox: **IP → Services → api** → enable, port 8728.
+
+### Buat user terbatas
+
+```
+/user add name=nova-api password=password-kuat group=write
+```
+
+NOVA otomatis menambah/menghapus rule `/ip firewall nat` untuk port forwarding SSH (port `220XX` → `22` ke IP internal VM).
+
+---
+
+## Midtrans Setup
+
+1. Daftar dan aktifkan Snap API di dashboard Midtrans
+2. Salin **Server Key** dan **Client Key**
+3. Set webhook URL:
+   ```
+   https://api.yourdomain.com/api/v1/payment/webhook
+   ```
+4. Saat siap live, set production:
+   ```env
+   MIDTRANS_IS_PRODUCTION="true"
+   MIDTRANS_SERVER_KEY="Mid-server-xxxx"   # tanpa SB-
+   ```
+
+---
+
+## Variabel Environment Lengkap
+
+| Variable | Keterangan | Contoh |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@host:5432/db` |
+| `JWT_SECRET` | Secret token user (min 32 char) | random hex |
+| `JWT_EXPIRES_IN` | Masa berlaku access token | `15m` |
+| `JWT_REFRESH_EXPIRES_IN` | Masa berlaku refresh token | `7d` |
+| `ADMIN_JWT_SECRET` | Secret token admin (harus beda) | random hex |
+| `REDIS_HOST` | Redis host | `localhost` |
+| `REDIS_PORT` | Redis port | `6379` |
+| `PROXMOX_HOST` | IP/hostname Proxmox | `10.10.10.250` |
+| `PROXMOX_PORT` | Port Proxmox API | `8006` |
+| `PROXMOX_TOKEN_ID` | API token ID | `nova@pve!nova-token` |
+| `PROXMOX_TOKEN_SECRET` | API token secret (UUID) | `b6665bf4-...` |
+| `PROXMOX_NODE` | Nama node default | `pve` |
+| `PROXMOX_VERIFY_SSL` | Verifikasi SSL cert | `false` |
+| `MIKROTIK_HOST` | IP MikroTik | `10.10.10.1` |
+| `MIKROTIK_USER` | User API MikroTik | `nova-api` |
+| `MIKROTIK_PASS` | Password user MikroTik | — |
+| `NAT_BRIDGE` | Bridge untuk VM NAT | `vmbr1` |
+| `NAT_GATEWAY` | Gateway subnet NAT | `10.20.0.1` |
+| `NAT_PUBLIC_IP` | IP publik untuk SSH forwarding | `103.x.x.x` |
+| `PUBLIC_BRIDGE` | Bridge untuk VM Public IP | `vmbr0` |
+| `MIDTRANS_SERVER_KEY` | Server key Midtrans | `SB-Mid-server-xxxx` |
+| `MIDTRANS_CLIENT_KEY` | Client key Midtrans | `SB-Mid-client-xxxx` |
+| `MIDTRANS_IS_PRODUCTION` | Mode produksi Midtrans | `false` |
+| `SMTP_HOST` | SMTP server | `smtp.gmail.com` |
+| `SMTP_PORT` | SMTP port | `587` |
+| `SMTP_USER` | Email pengirim | `noreply@yourdomain.com` |
+| `SMTP_PASS` | Password / app password | — |
+| `EMAIL_FROM` | Nama + email pengirim | `NOVA <noreply@...>` |
+| `FRONTEND_URL` | URL user portal (untuk CORS) | `https://app.yourdomain.com` |
+| `ADMIN_URL` | URL admin panel (untuk CORS) | `https://admin.yourdomain.com` |
+| `PORT` | Port API server | `3000` |
+| `NODE_ENV` | Environment | `production` |
+
+---
+
+## Perintah Berguna
+
+```bash
+# Status semua proses (production)
+pm2 list
+pm2 logs nova-api --lines 100
+
+# Restart service
+pm2 restart nova-api
+
+# Database
+pnpm db:push        # push schema changes
+pnpm db:studio      # Prisma Studio GUI (port 5555)
+pnpm db:seed        # seed ulang data awal
+
+# Build
+pnpm build
+pnpm --filter=api build   # build satu app saja
 ```

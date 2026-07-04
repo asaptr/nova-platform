@@ -1,9 +1,18 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common'
+import {
+  Controller, Get, Post, Patch, Body, Param, Query, UseGuards, UseInterceptors, UploadedFile,
+} from '@nestjs/common'
+import { FileInterceptor } from '@nestjs/platform-express'
+import { diskStorage } from 'multer'
+import { extname, join } from 'path'
+import { existsSync, mkdirSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { AdminJwtGuard } from './admin-jwt.guard'
 import { RolesGuard } from '../common/guards/roles.guard'
 import { Roles } from '../common/decorators/roles.decorator'
 import { CurrentUser } from '../common/decorators/current-user.decorator'
 import { PrismaService } from '../prisma/prisma.service'
+
+const uploadDir = join(process.cwd(), 'uploads', 'tickets')
 
 @Controller('admin/tickets')
 @UseGuards(AdminJwtGuard, RolesGuard)
@@ -53,13 +62,37 @@ export class AdminTicketsController {
   }
 
   @Post(':id/reply')
-  reply(
+  @UseInterceptors(FileInterceptor('attachment', {
+    storage: diskStorage({
+      destination: (_req, _file, cb) => {
+        if (!existsSync(uploadDir)) mkdirSync(uploadDir, { recursive: true })
+        cb(null, uploadDir)
+      },
+      filename: (_req, file, cb) => {
+        cb(null, `${randomUUID()}${extname(file.originalname)}`)
+      },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+      cb(null, allowed.includes(extname(file.originalname).toLowerCase()))
+    },
+  }))
+  async reply(
     @Param('id') id: string,
     @CurrentUser('sub') adminId: string,
-    @Body() body: { message: string },
+    @Body('message') message: string,
+    @UploadedFile() file?: Express.Multer.File,
   ) {
+    const attachmentUrl = file ? `/uploads/tickets/${file.filename}` : undefined
     return this.prisma.ticketMessage.create({
-      data: { ticketId: id, senderType: 'admin', senderId: adminId, message: body.message },
+      data: {
+        ticketId: id,
+        senderType: 'admin',
+        senderId: adminId,
+        message: message ?? '',
+        attachmentUrl,
+      },
     })
   }
 

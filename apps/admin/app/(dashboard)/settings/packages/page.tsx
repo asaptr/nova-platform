@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import api from '@/lib/api'
 import { formatRupiah } from '@/lib/utils'
-import { Plus, Trash2, Pencil, X, Check } from 'lucide-react'
+import { Plus, Trash2, Pencil, X, Check, Server } from 'lucide-react'
 
 const emptyForm = {
-  name: '', description: '', cpu: '', ram: '', disk: '', pricePerHour: '',
-  ipType: 'nat', osTemplates: '', isActive: true,
+  name: '', vcpu: '', ramMb: '', diskGb: '', bandwidthGb: '0',
+  priceMonthly: '', priceHourly: '', ipType: 'nat', isActive: true,
 }
 
 export default function AdminPackagesPage() {
@@ -28,13 +29,13 @@ export default function AdminPackagesPage() {
   function startEdit(pkg: any) {
     setForm({
       name: pkg.name,
-      description: pkg.description ?? '',
-      cpu: String(pkg.cpu),
-      ram: String(pkg.ram),
-      disk: String(pkg.disk),
-      pricePerHour: String(pkg.pricePerHour),
+      vcpu: String(pkg.vcpu),
+      ramMb: String(pkg.ramMb),
+      diskGb: String(pkg.diskGb),
+      bandwidthGb: String(pkg.bandwidthGb ?? 0),
+      priceMonthly: String(pkg.priceMonthly),
+      priceHourly: String(pkg.priceHourly),
       ipType: pkg.ipType,
-      osTemplates: (pkg.osTemplates ?? []).join(', '),
       isActive: pkg.isActive,
     })
     setEditId(pkg.id)
@@ -48,12 +49,15 @@ export default function AdminPackagesPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const body = {
-      ...form,
-      cpu: Number(form.cpu),
-      ram: Number(form.ram),
-      disk: Number(form.disk),
-      pricePerHour: Number(form.pricePerHour),
-      osTemplates: form.osTemplates.split(',').map(s => s.trim()).filter(Boolean),
+      name: form.name,
+      vcpu: Number(form.vcpu),
+      ramMb: Number(form.ramMb),
+      diskGb: Number(form.diskGb),
+      bandwidthGb: Number(form.bandwidthGb),
+      priceMonthly: Number(form.priceMonthly),
+      priceHourly: Number(form.priceHourly),
+      ipType: form.ipType,
+      isActive: form.isActive,
     }
     try {
       if (editId) {
@@ -82,11 +86,16 @@ export default function AdminPackagesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Manajemen Paket</h1>
-        <button onClick={() => { setShowForm(true); setEditId(null); setForm({ ...emptyForm }) }}
-          className="flex items-center gap-1.5 px-3 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-colors"
-        >
-          <Plus size={14} /> Tambah Paket
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/settings/templates" className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted hover:text-primary transition-colors">
+            <Server size={14} /> OS Templates
+          </Link>
+          <button onClick={() => { setShowForm(true); setEditId(null); setForm({ ...emptyForm }) }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-colors"
+          >
+            <Plus size={14} /> Tambah Paket
+          </button>
+        </div>
       </div>
 
       {msg && <p className="text-sm text-blue-600 dark:text-blue-400">{msg}</p>}
@@ -100,29 +109,34 @@ export default function AdminPackagesPage() {
               <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="Starter NAT 1" className={inputCls} />
             </div>
-            <div className="col-span-2">
-              <label className="text-xs text-muted mb-1 block">Deskripsi</label>
-              <input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Cocok untuk..." className={inputCls} />
-            </div>
             <div>
-              <label className="text-xs text-muted mb-1 block">CPU (core)</label>
-              <input required type="number" min="1" value={form.cpu} onChange={e => setForm(f => ({ ...f, cpu: e.target.value }))}
+              <label className="text-xs text-muted mb-1 block">vCPU (core)</label>
+              <input required type="number" min="1" value={form.vcpu} onChange={e => setForm(f => ({ ...f, vcpu: e.target.value }))}
                 className={inputCls} />
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">RAM (MB)</label>
-              <input required type="number" min="512" value={form.ram} onChange={e => setForm(f => ({ ...f, ram: e.target.value }))}
+              <input required type="number" min="512" value={form.ramMb} onChange={e => setForm(f => ({ ...f, ramMb: e.target.value }))}
                 className={inputCls} />
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">Disk (GB)</label>
-              <input required type="number" min="5" value={form.disk} onChange={e => setForm(f => ({ ...f, disk: e.target.value }))}
+              <input required type="number" min="5" value={form.diskGb} onChange={e => setForm(f => ({ ...f, diskGb: e.target.value }))}
+                className={inputCls} />
+            </div>
+            <div>
+              <label className="text-xs text-muted mb-1 block">Bandwidth (GB, 0 = unlimited)</label>
+              <input required type="number" min="0" value={form.bandwidthGb} onChange={e => setForm(f => ({ ...f, bandwidthGb: e.target.value }))}
+                className={inputCls} />
+            </div>
+            <div>
+              <label className="text-xs text-muted mb-1 block">Harga/Bulan (Rp)</label>
+              <input required type="number" min="1" value={form.priceMonthly} onChange={e => setForm(f => ({ ...f, priceMonthly: e.target.value }))}
                 className={inputCls} />
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">Harga/Jam (Rp)</label>
-              <input required type="number" min="1" value={form.pricePerHour} onChange={e => setForm(f => ({ ...f, pricePerHour: e.target.value }))}
+              <input required type="number" min="1" step="0.0001" value={form.priceHourly} onChange={e => setForm(f => ({ ...f, priceHourly: e.target.value }))}
                 className={inputCls} />
             </div>
             <div>
@@ -140,12 +154,6 @@ export default function AdminPackagesPage() {
                 <option value="true">Aktif</option>
                 <option value="false">Nonaktif</option>
               </select>
-            </div>
-            <div className="col-span-2">
-              <label className="text-xs text-muted mb-1 block">OS Templates (pisah koma)</label>
-              <input value={form.osTemplates} onChange={e => setForm(f => ({ ...f, osTemplates: e.target.value }))}
-                placeholder="ubuntu-22.04-cloudinit, debian-12-cloudinit"
-                className={inputCls} />
             </div>
           </div>
           <div className="flex gap-2 justify-end">
@@ -169,10 +177,7 @@ export default function AdminPackagesPage() {
         ) : packages.map(pkg => (
           <div key={pkg.id} className="bg-card border border-border rounded-xl p-5 space-y-3">
             <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="font-semibold">{pkg.name}</p>
-                <p className="text-xs text-muted">{pkg.description}</p>
-              </div>
+              <p className="font-semibold">{pkg.name}</p>
               <div className="flex gap-1 shrink-0">
                 <button onClick={() => startEdit(pkg)}
                   className="p-1.5 rounded-lg text-muted hover:text-accent hover:bg-accent/10 transition-colors">
@@ -187,22 +192,22 @@ export default function AdminPackagesPage() {
             <div className="grid grid-cols-3 gap-2 text-center text-sm">
               <div className="bg-background rounded-lg p-2">
                 <p className="text-xs text-muted">CPU</p>
-                <p className="font-bold">{pkg.cpu}c</p>
+                <p className="font-bold">{pkg.vcpu}c</p>
               </div>
               <div className="bg-background rounded-lg p-2">
                 <p className="text-xs text-muted">RAM</p>
-                <p className="font-bold">{pkg.ram >= 1024 ? `${pkg.ram / 1024}GB` : `${pkg.ram}MB`}</p>
+                <p className="font-bold">{pkg.ramMb >= 1024 ? `${pkg.ramMb / 1024}GB` : `${pkg.ramMb}MB`}</p>
               </div>
               <div className="bg-background rounded-lg p-2">
                 <p className="text-xs text-muted">Disk</p>
-                <p className="font-bold">{pkg.disk}GB</p>
+                <p className="font-bold">{pkg.diskGb}GB</p>
               </div>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className={`text-xs px-2 py-0.5 rounded font-medium ${
                 pkg.ipType === 'nat' ? 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
               }`}>{pkg.ipType.toUpperCase()}</span>
-              <p className="font-semibold text-accent">{formatRupiah(pkg.pricePerHour)}<span className="text-xs text-muted font-normal">/jam</span></p>
+              <p className="font-semibold text-accent">{formatRupiah(Number(pkg.priceHourly))}<span className="text-xs text-muted font-normal">/jam</span></p>
             </div>
             {!pkg.isActive && (
               <p className="text-xs text-amber-600 dark:text-amber-400">Nonaktif — tidak tampil di portal</p>

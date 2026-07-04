@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Delete, Body, Param, UseGuards } from '@nestjs/common'
 import { VmsService } from './vms.service'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { CurrentUser } from '../common/decorators/current-user.decorator'
@@ -11,6 +11,11 @@ export class VmsController {
   @Get('packages')
   packages() {
     return this.vms.listPackages()
+  }
+
+  @Get('templates')
+  templates() {
+    return this.vms.listTemplates()
   }
 
   @Get()
@@ -49,6 +54,11 @@ export class VmsController {
   @Post(':id/console')
   console(@CurrentUser('sub') userId: string, @Param('id') id: string) {
     return this.vms.getConsole(id, userId)
+  }
+
+  @Delete(':id')
+  delete(@CurrentUser('sub') userId: string, @Param('id') id: string) {
+    return this.vms.deleteVm(id, userId)
   }
 
   @Post(':id/reset-password')

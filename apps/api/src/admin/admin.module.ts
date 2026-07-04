@@ -10,9 +10,13 @@ import { AdminUsersController } from './admin-users.controller'
 import { AdminTicketsController } from './admin-tickets.controller'
 import { AdminNodesController } from './admin-nodes.controller'
 import { AdminPackagesController } from './admin-packages.controller'
+import { AdminTemplatesController } from './admin-templates.controller'
+import { AdminProxmoxController } from './admin-proxmox.controller'
+import { AdminSettingsController } from './admin-settings.controller'
 import { AdminJwtStrategy } from './admin-jwt.strategy'
 import { ProxmoxModule } from '../proxmox/proxmox.module'
 import { MikrotikModule } from '../mikrotik/mikrotik.module'
+import { SystemConfigModule } from '../system-config/system-config.module'
 import { RolesGuard } from '../common/guards/roles.guard'
 
 @Module({
@@ -26,6 +30,7 @@ import { RolesGuard } from '../common/guards/roles.guard'
     }),
     ProxmoxModule,
     MikrotikModule,
+    SystemConfigModule,
   ],
   providers: [AdminAuthService, AdminJwtStrategy, RolesGuard],
   controllers: [
@@ -36,6 +41,9 @@ import { RolesGuard } from '../common/guards/roles.guard'
     AdminTicketsController,
     AdminNodesController,
     AdminPackagesController,
+    AdminTemplatesController,
+    AdminProxmoxController,
+    AdminSettingsController,
   ],
 })
 export class AdminModule {}

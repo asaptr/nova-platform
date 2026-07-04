@@ -3,6 +3,8 @@ import { useEffect, useState, useCallback } from 'react'
 import api from '@/lib/api'
 import type { Vm } from '@langitnode/types'
 
+const ACTIVE_STATUSES = ['pending', 'provisioning', 'running', 'stopped', 'suspended']
+
 export function useVmStatus(vmId: string, intervalMs = 5000) {
   const [vm, setVm] = useState<Vm | null>(null)
   const [loading, setLoading] = useState(true)
@@ -20,9 +22,8 @@ export function useVmStatus(vmId: string, intervalMs = 5000) {
 
   useEffect(() => {
     refetch()
-    const POLL_STATUSES = ['pending', 'provisioning']
     const id = setInterval(() => {
-      if (vm && !POLL_STATUSES.includes(vm.status)) return
+      if (vm && !ACTIVE_STATUSES.includes(vm.status)) return
       refetch()
     }, intervalMs)
     return () => clearInterval(id)

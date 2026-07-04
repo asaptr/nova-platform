@@ -13,8 +13,9 @@ export class BillingController {
     @CurrentUser('sub') userId: string,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
+    @Query('type') type?: string,
   ) {
-    return this.billing.getTransactions(userId, +page, +limit)
+    return this.billing.getTransactions(userId, +page, +limit, type)
   }
 
   @Get('usage')

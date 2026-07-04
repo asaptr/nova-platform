@@ -72,7 +72,7 @@ export default function AdminManagementPage() {
               <label className="text-xs text-muted mb-1 block">Email</label>
               <input required type="email" value={form.email}
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-                className={inputCls} placeholder="admin@langitnode.id" />
+                className={inputCls} placeholder="admin@domain.com" />
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">Password</label>

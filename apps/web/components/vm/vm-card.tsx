@@ -2,13 +2,12 @@
 import Link from 'next/link'
 import type { Vm } from '@langitnode/types'
 import { VmStatusBadge } from './vm-status-badge'
-import { Server, Copy } from 'lucide-react'
-import { formatDate } from '@/lib/utils'
+import { Server, Copy, Monitor, AlertTriangle } from 'lucide-react'
+import { formatDate, formatOsName } from '@/lib/utils'
 
 export function VmCard({ vm }: { vm: Vm }) {
-  const sshCmd = vm.ipType === 'nat'
-    ? `ssh root@${vm.ipAddress} -p ${vm.sshPort}`
-    : `ssh root@${vm.ipAddress}`
+  const isNat = vm.ipType === 'nat'
+  const sshCmd = `ssh root@${vm.ipAddress}`
 
   function copy() {
     navigator.clipboard.writeText(sshCmd)
@@ -38,11 +37,11 @@ export function VmCard({ vm }: { vm: Vm }) {
         </div>
         <div>
           <p className="text-muted text-xs">IP</p>
-          <p className="font-medium font-mono">{vm.ipAddress ?? '—'}</p>
+          <p className="font-medium font-mono">{isNat ? '—' : (vm.ipAddress ?? '—')}</p>
         </div>
         <div>
           <p className="text-muted text-xs">OS</p>
-          <p className="font-medium">{vm.osTemplate ?? '—'}</p>
+          <p className="font-medium">{(vm as any).templateName ?? formatOsName(vm.osTemplate)}</p>
         </div>
         <div>
           <p className="text-muted text-xs">Dibuat</p>
@@ -50,13 +49,36 @@ export function VmCard({ vm }: { vm: Vm }) {
         </div>
       </div>
 
-      {vm.status === 'running' && vm.ipAddress && (
-        <div className="flex items-center gap-2 bg-black/5 dark:bg-white/5 rounded-lg px-3 py-2">
-          <code className="text-xs flex-1 truncate font-mono">{sshCmd}</code>
-          <button onClick={copy} className="text-muted hover:text-primary flex-shrink-0">
-            <Copy size={14} />
-          </button>
+      {vm.status === 'suspended' && (
+        <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+          <AlertTriangle size={13} className="text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-amber-700 dark:text-amber-300">
+            <p className="font-medium">VM disuspend — saldo habis</p>
+            {(vm as any).expiresAt && (
+              <p className="mt-0.5 text-amber-600 dark:text-amber-400">
+                Dihapus otomatis: {formatDate((vm as any).expiresAt)}
+              </p>
+            )}
+            <Link href="/billing/topup" className="underline hover:no-underline">Topup sekarang →</Link>
+          </div>
         </div>
+      )}
+
+      {vm.status === 'running' && (
+        isNat ? (
+          <div className="flex items-center gap-2 bg-blue-50 dark:bg-blue-950/30 rounded-lg px-3 py-2">
+            <Monitor size={13} className="text-blue-500 flex-shrink-0" />
+            <span className="text-xs text-blue-600 dark:text-blue-400">Akses via Web Console</span>
+            <Link href={`/vms/${vm.id}`} className="ml-auto text-xs text-blue-500 hover:underline">Buka →</Link>
+          </div>
+        ) : vm.ipAddress ? (
+          <div className="flex items-center gap-2 bg-black/5 dark:bg-white/5 rounded-lg px-3 py-2">
+            <code className="text-xs flex-1 truncate font-mono">{sshCmd}</code>
+            <button onClick={copy} className="text-muted hover:text-primary flex-shrink-0">
+              <Copy size={14} />
+            </button>
+          </div>
+        ) : null
       )}
     </div>
   )
