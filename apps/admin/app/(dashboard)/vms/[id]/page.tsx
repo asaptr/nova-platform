@@ -4,8 +4,9 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate, formatRupiah, formatOsName } from '@/lib/utils'
-import { ArrowLeft, Play, Square, RotateCcw, PauseCircle, PlayCircle, Monitor, Key, RefreshCw, ChevronDown, ChevronUp, Trash2 } from 'lucide-react'
+import { ArrowLeft, Play, Square, RotateCcw, PauseCircle, PlayCircle, Monitor, Key, RefreshCw, ChevronDown, ChevronUp, Trash2, Terminal, X } from 'lucide-react'
 import { VmConsole } from '@/components/vm/vm-console'
+import { useToast } from '@/components/ui/toast'
 
 const statusColor: Record<string, string> = {
   running:      'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300',
@@ -26,9 +27,12 @@ export default function AdminVmDetailPage() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [newPw, setNewPw] = useState('')
-  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const { toast } = useToast()
   const [showConsole, setShowConsole] = useState(false)
+  const [consoleTab, setConsoleTab] = useState<'vnc' | 'terminal'>('vnc')
+  const [sessionKey, setSessionKey] = useState(0)
+  const [consoleDropdown, setConsoleDropdown] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
@@ -47,37 +51,49 @@ export default function AdminVmDetailPage() {
     return () => clearInterval(interval)
   }, [load])
 
+  const ACTION_SUCCESS: Record<string, string> = {
+    start:          'VM berhasil dinyalakan',
+    stop:           'VM berhasil dimatikan',
+    reboot:         'VM berhasil di-reboot',
+    suspend:        'VM berhasil di-suspend',
+    unsuspend:      'VM berhasil diaktifkan kembali',
+    'reset-password': 'Password root berhasil di-reset',
+    'enable-serial':    'Serial console diaktifkan. Reboot VM agar terminal (xterm) tersedia.',
+    'fix-vga':          'VGA berhasil diperbaiki. Reboot VM agar perubahan berlaku.',
+    'enable-autostart': 'Autostart diaktifkan. VM akan menyala otomatis saat node hidup.',
+  }
+
   async function action(type: string, body?: any) {
-    setActionLoading(type); setMsg(null)
+    setActionLoading(type)
     try {
-      await api.post(`/admin/vms/${id}/${type}`, body ?? {})
-      setMsg({ text: `Berhasil: ${type}`, ok: true })
+      const { data } = await api.post(`/admin/vms/${id}/${type}`, body ?? {})
+      toast(data?.message ?? ACTION_SUCCESS[type] ?? `Berhasil: ${type}`, 'success')
       await load()
     } catch (e: any) {
-      setMsg({ text: e.response?.data?.message ?? `Gagal: ${type}`, ok: false })
+      toast(e.response?.data?.message ?? `Gagal: ${type}`, 'error')
     } finally { setActionLoading(null) }
   }
 
   async function deleteVm() {
     if (!confirm(`Hapus VM ${vm.hostname} (${vm.displayId}) permanen dari Proxmox? Tindakan ini tidak dapat dibatalkan.`)) return
-    setDeleting(true); setMsg(null)
+    setDeleting(true)
     try {
       await api.delete(`/admin/vms/${id}`)
-      setMsg({ text: 'VM berhasil dihapus', ok: true })
+      toast('VM berhasil dihapus', 'success')
       setTimeout(() => { window.location.href = '/vms' }, 1500)
     } catch (e: any) {
-      setMsg({ text: e.response?.data?.message ?? 'Gagal menghapus VM', ok: false })
+      toast(e.response?.data?.message ?? 'Gagal menghapus VM', 'error')
     } finally { setDeleting(false) }
   }
 
   async function syncStatus() {
-    setSyncing(true); setMsg(null)
+    setSyncing(true)
     try {
       const { data } = await api.post(`/admin/vms/${id}/sync-status`)
-      setMsg({ text: `Status disinkronkan: ${data.status}`, ok: true })
+      toast(`Status disinkronkan: ${data.status}`, 'success')
       await load()
     } catch (e: any) {
-      setMsg({ text: e.response?.data?.message ?? 'Gagal sync', ok: false })
+      toast(e.response?.data?.message ?? 'Gagal sync', 'error')
     } finally { setSyncing(false) }
   }
 
@@ -123,14 +139,6 @@ export default function AdminVmDetailPage() {
         </div>
       </div>
 
-      {msg && (
-        <div className={`p-3 rounded-lg text-sm border ${msg.ok
-          ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-950 dark:text-green-300 dark:border-green-800'
-          : 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-300 dark:border-red-800'}`}>
-          {msg.text}
-        </div>
-      )}
-
       {/* Actions */}
       <div className="flex flex-wrap gap-2 bg-card border border-border rounded-xl p-4">
         <button onClick={() => action('start')}
@@ -166,12 +174,35 @@ export default function AdminVmDetailPage() {
             <PlayCircle size={14} /> Unsuspend
           </button>
         )}
-        <button
-          onClick={() => setShowConsole(v => !v)}
-          disabled={isStopped}
-          className={`${btnBase} bg-gray-700 text-white hover:bg-gray-800`}>
-          <Monitor size={14} /> Konsol {showConsole ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        </button>
+        {/* Console split-button dropdown */}
+        <div className="relative">
+          <div className="flex rounded-lg overflow-hidden">
+            <button
+              onClick={() => { setShowConsole(true); setConsoleDropdown(false) }}
+              disabled={isStopped || !!actionLoading}
+              className={`${btnBase} rounded-none bg-gray-700 text-white hover:bg-gray-800`}>
+              <Monitor size={14} /> Konsol
+            </button>
+            <button
+              onClick={() => setConsoleDropdown(v => !v)}
+              disabled={isStopped || !!actionLoading}
+              className="px-2 py-1.5 bg-gray-700 text-white hover:bg-gray-600 border-l border-gray-600 rounded-r-lg disabled:opacity-50 transition-colors">
+              <ChevronDown size={12} />
+            </button>
+          </div>
+          {consoleDropdown && (
+            <div className="absolute top-full left-0 mt-1 w-44 bg-card border border-border rounded-xl shadow-lg z-20 overflow-hidden">
+              <button onClick={() => { setConsoleTab('vnc'); setSessionKey(k => k + 1); setShowConsole(true); setConsoleDropdown(false) }}
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                <Monitor size={13} className="text-muted" /> VGA (noVNC)
+              </button>
+              <button onClick={() => { setConsoleTab('terminal'); setSessionKey(k => k + 1); setShowConsole(true); setConsoleDropdown(false) }}
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-xs hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                <Terminal size={13} className="text-muted" /> Terminal (xterm)
+              </button>
+            </div>
+          )}
+        </div>
         <div className="ml-auto">
           <button
             onClick={deleteVm}
@@ -183,9 +214,32 @@ export default function AdminVmDetailPage() {
       </div>
 
       {showConsole && !isStopped && (
-        <div className="bg-card border border-border rounded-xl p-4 space-y-2">
-          <h2 className="font-semibold text-sm flex items-center gap-2"><Monitor size={14} /> Console</h2>
-          <VmConsole vmId={id} />
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+            <div className="flex items-center gap-2">
+              {consoleTab === 'vnc'
+                ? <><Monitor size={14} className="text-muted" /><span className="text-sm font-medium">VGA (noVNC)</span></>
+                : <><Terminal size={14} className="text-muted" /><span className="text-sm font-medium">Terminal (xterm)</span></>
+              }
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { const next = consoleTab === 'vnc' ? 'terminal' : 'vnc'; setConsoleTab(next); setSessionKey(k => k + 1) }}
+                className="text-xs text-muted hover:text-primary flex items-center gap-1 px-2 py-1 rounded border border-border hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                {consoleTab === 'vnc'
+                  ? <><Terminal size={11} /> Switch ke xterm</>
+                  : <><Monitor size={11} /> Switch ke noVNC</>
+                }
+              </button>
+              <button onClick={() => setShowConsole(false)}
+                className="p-1 text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5 rounded transition-colors">
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+          <div className="p-3">
+            <VmConsole key={sessionKey} vmId={id} initialTab={consoleTab} onRetry={() => setSessionKey(k => k + 1)} />
+          </div>
         </div>
       )}
 
@@ -293,6 +347,39 @@ export default function AdminVmDetailPage() {
           </button>
         </div>
       </div>
+
+      {/* Serial Console Toggle */}
+      {(() => {
+        const serialEnabled = !!vm?.proxmoxStatus?.serial0
+        return (
+          <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-sm">Serial Console</h2>
+                <p className="text-xs text-muted mt-0.5">
+                  {serialEnabled
+                    ? 'Aktif — terminal (xterm) tersedia. Reboot VM jika baru diaktifkan.'
+                    : 'Nonaktif — aktifkan agar tab Terminal (xterm) berfungsi, lalu reboot VM.'}
+                </p>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${serialEnabled ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>
+                {serialEnabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            {serialEnabled ? (
+              <button onClick={() => action('disable-serial')} disabled={!!actionLoading}
+                className={`${btnBase} border border-border text-red-500 hover:bg-red-500/10`}>
+                <Terminal size={14} /> Disable Serial Console
+              </button>
+            ) : (
+              <button onClick={() => action('enable-serial')} disabled={!!actionLoading}
+                className={`${btnBase} border border-border text-green-600 hover:bg-green-500/10`}>
+                <Terminal size={14} /> Enable Serial Console
+              </button>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }

@@ -18,9 +18,10 @@ model User {
   emailVerifiedAt DateTime?
   createdAt       DateTime  @default(now())
 
-  vms          Vm[]
-  transactions Transaction[]
-  tickets      Ticket[]
+  vms           Vm[]
+  transactions  Transaction[]
+  tickets       Ticket[]
+  notifications Notification[]
 }
 
 model VmCounter {
@@ -196,4 +197,17 @@ model SystemConfig {
   value     String   @db.Text
   updatedAt DateTime @updatedAt
   updatedBy String?
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String?
+  type      String
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
 }

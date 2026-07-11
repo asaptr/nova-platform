@@ -80,7 +80,7 @@ export class AdminVmsController {
     const template = vm.osTemplate
       ? await this.prisma.vmTemplate.findFirst({ where: { proxmoxValue: vm.osTemplate }, select: { name: true } })
       : null
-    return { ...vm, templateName: template?.name ?? null, proxmoxStatus: { ...proxmoxStatus, vga: proxmoxConfig?.vga } }
+    return { ...vm, templateName: template?.name ?? null, proxmoxStatus: { ...proxmoxStatus, vga: proxmoxConfig?.vga, serial0: proxmoxConfig?.serial0 } }
   }
 
   private async vmAction(vmId: string, adminId: string, action: string, reason?: string, fn?: () => Promise<any>) {
@@ -103,11 +103,11 @@ export class AdminVmsController {
   start(@Param('id') id: string, @CurrentUser('sub') adminId: string, @Body() b: { reason?: string }) {
     return this.vmAction(id, adminId, 'start', b.reason, async () => {
       const vm = await this.prisma.vm.findUnique({ where: { id } })
-      // Auto-fix VGA serial0 → std before starting (non-fatal)
+      // Auto-fix VGA serial0 → std before starting (non-fatal). Keep serial0 for xterm.
       try {
         const config = await this.proxmox.getVmConfig(vm.proxmoxNode, vm.proxmoxVmid)
         if (config?.vga === 'serial0') {
-          await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { vga: 'std', delete: 'serial0' })
+          await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { vga: 'std' })
         }
       } catch {}
       // Check live Proxmox status to decide resume vs start
@@ -192,9 +192,38 @@ export class AdminVmsController {
     const config = await this.proxmox.getVmConfig(vm.proxmoxNode, vm.proxmoxVmid)
     const currentVga = config.vga ?? 'std'
     if (currentVga !== 'serial0') return { message: `VGA sudah ${currentVga}, tidak perlu diubah` }
-    await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { vga: 'std', delete: 'serial0' })
+    await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { vga: 'std' })
+    if (!config.serial0) {
+      await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { serial0: 'socket' }).catch(() => {})
+    }
     await this.audit.log({ actorType: 'admin', actorId: adminId, action: 'vm.fix_vga', resourceType: 'vm', resourceId: id })
-    return { message: 'VGA diubah ke std, delete serial0. VM perlu direboot agar perubahan berlaku.' }
+    return { message: 'VGA diubah ke std, serial0 dipertahankan. VM perlu direboot agar perubahan berlaku.' }
+  }
+
+  @Post(':id/enable-serial')
+  async enableSerial(@Param('id') id: string, @CurrentUser('sub') adminId: string) {
+    const vm = await this.prisma.vm.findUnique({ where: { id } })
+    if (!vm?.proxmoxVmid || !vm?.proxmoxNode) return { error: 'VM belum ready' }
+    await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { serial0: 'socket' })
+    await this.audit.log({ actorType: 'admin', actorId: adminId, action: 'vm.enable_serial', resourceType: 'vm', resourceId: id })
+    return { message: 'Serial console diaktifkan. VM perlu direboot agar terminal (xterm) tersedia.' }
+  }
+
+  @Post(':id/disable-serial')
+  async disableSerial(@Param('id') id: string, @CurrentUser('sub') adminId: string) {
+    const vm = await this.prisma.vm.findUnique({ where: { id } })
+    if (!vm?.proxmoxVmid || !vm?.proxmoxNode) return { error: 'VM belum ready' }
+    await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { delete: 'serial0' })
+    await this.audit.log({ actorType: 'admin', actorId: adminId, action: 'vm.disable_serial', resourceType: 'vm', resourceId: id })
+    return { message: 'Serial console dinonaktifkan.' }
+  }
+
+  @Post(':id/terminal')
+  async terminal(@Param('id') id: string, @CurrentUser('sub') adminId: string) {
+    const vm = await this.prisma.vm.findUnique({ where: { id } })
+    if (!vm?.proxmoxVmid) return { error: 'VM belum ready' }
+    await this.audit.log({ actorType: 'admin', actorId: adminId, action: 'vm.terminal_access', resourceType: 'vm', resourceId: id })
+    return { ok: true }
   }
 
   @Delete(':id')

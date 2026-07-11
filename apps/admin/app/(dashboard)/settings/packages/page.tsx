@@ -7,7 +7,7 @@ import { Plus, Trash2, Pencil, X, Check, Server } from 'lucide-react'
 
 const emptyForm = {
   name: '', vcpu: '', ramMb: '', diskGb: '', bandwidthGb: '0',
-  priceMonthly: '', priceHourly: '', ipType: 'nat', isActive: true,
+  priceMonthly: '', ipType: 'nat', isActive: true,
 }
 
 export default function AdminPackagesPage() {
@@ -34,7 +34,6 @@ export default function AdminPackagesPage() {
       diskGb: String(pkg.diskGb),
       bandwidthGb: String(pkg.bandwidthGb ?? 0),
       priceMonthly: String(pkg.priceMonthly),
-      priceHourly: String(pkg.priceHourly),
       ipType: pkg.ipType,
       isActive: pkg.isActive,
     })
@@ -46,6 +45,8 @@ export default function AdminPackagesPage() {
     setShowForm(false); setEditId(null); setForm({ ...emptyForm }); setMsg(null)
   }
 
+  const priceHourly = form.priceMonthly ? Math.ceil(Number(form.priceMonthly) / 720) : 0
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     const body = {
@@ -55,7 +56,7 @@ export default function AdminPackagesPage() {
       diskGb: Number(form.diskGb),
       bandwidthGb: Number(form.bandwidthGb),
       priceMonthly: Number(form.priceMonthly),
-      priceHourly: Number(form.priceHourly),
+      priceHourly,
       ipType: form.ipType,
       isActive: form.isActive,
     }
@@ -135,9 +136,11 @@ export default function AdminPackagesPage() {
                 className={inputCls} />
             </div>
             <div>
-              <label className="text-xs text-muted mb-1 block">Harga/Jam (Rp)</label>
-              <input required type="number" min="1" step="0.0001" value={form.priceHourly} onChange={e => setForm(f => ({ ...f, priceHourly: e.target.value }))}
-                className={inputCls} />
+              <label className="text-xs text-muted mb-1 block">Harga/Jam (auto)</label>
+              <div className={`${inputCls} bg-muted/5 text-muted cursor-default select-none`}>
+                {priceHourly > 0 ? formatRupiah(priceHourly) : '—'}
+                <span className="text-xs ml-1 opacity-60">= bulanan ÷ 720</span>
+              </div>
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">Tipe IP</label>

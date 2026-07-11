@@ -1,5 +1,5 @@
 {
-  "name": "@langitnode/api",
+  "name": "@nova/api",
   "version": "1.0.0",
   "description": "Langit Node Backend API",
   "scripts": {
@@ -30,6 +30,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "node-routeros": "^1.3.3",
+    "node-ssh": "^13.2.1",
     "nodemailer": "^6.9.13",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

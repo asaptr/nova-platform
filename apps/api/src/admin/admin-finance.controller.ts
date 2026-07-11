@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Body, Param, Query, UseGuards, Logger } from '@nestjs/common'
 import { AdminJwtGuard } from './admin-jwt.guard'
 import { RolesGuard } from '../common/guards/roles.guard'
 import { Roles } from '../common/decorators/roles.decorator'
@@ -11,6 +11,8 @@ import { AuditService } from '../audit/audit.service'
 @UseGuards(AdminJwtGuard, RolesGuard)
 @Roles('superadmin')
 export class AdminFinanceController {
+  private readonly logger = new Logger(AdminFinanceController.name)
+
   constructor(
     private prisma: PrismaService,
     private proxmox: ProxmoxService,
@@ -142,10 +144,33 @@ export class AdminFinanceController {
   @Get('capacity')
   async capacity() {
     try {
-      const nodes = await this.proxmox.getNodes()
-      return { nodes }
-    } catch {
-      return { nodes: [], error: 'Tidak dapat terhubung ke Proxmox' }
+      const [nodes, vms] = await Promise.all([
+        this.proxmox.getNodes(),
+        this.prisma.vm.findMany({
+          where: { status: { notIn: ['deleted', 'failed'] } },
+          select: { package: { select: { vcpu: true, ramMb: true, diskGb: true } } },
+        }),
+      ])
+
+      const alloc = vms.reduce((acc, v) => ({
+        cpu:  acc.cpu  + (v.package?.vcpu  ?? 0),
+        ram:  acc.ram  + (v.package?.ramMb ?? 0),
+        disk: acc.disk + (v.package?.diskGb ?? 0),
+      }), { cpu: 0, ram: 0, disk: 0 })
+
+      const totalCpu  = nodes.reduce((s: number, n: any) => s + (n.maxcpu  ?? 0), 0)
+      const totalRam  = nodes.reduce((s: number, n: any) => s + Math.round((n.maxmem  ?? 0) / 1_073_741_824), 0)
+      const totalDisk = nodes.reduce((s: number, n: any) => s + Math.round((n.maxdisk ?? 0) / 1_073_741_824), 0)
+
+      return {
+        totalCpu,  usedCpu:  alloc.cpu,
+        totalRam,  usedRam:  Math.round(alloc.ram / 1024),
+        totalDisk, usedDisk: alloc.disk,
+        nodes,
+      }
+    } catch (e: any) {
+      this.logger.error(`capacity() failed: ${e?.message}`, e?.stack)
+      return { totalCpu: 0, usedCpu: 0, totalRam: 0, usedRam: 0, totalDisk: 0, usedDisk: 0, nodes: [], error: 'Tidak dapat terhubung ke Proxmox' }
     }
   }
 
@@ -155,12 +180,26 @@ export class AdminFinanceController {
     const start = month ? new Date(month) : new Date(now.getFullYear(), now.getMonth(), 1)
     const end = new Date(start.getFullYear(), start.getMonth() + 1, 1)
 
-    return this.prisma.billingUsage.groupBy({
+    const grouped = await this.prisma.billingUsage.groupBy({
       by: ['userId'],
       _sum: { amountCharged: true },
       where: { periodStart: { gte: start, lt: end } },
       orderBy: { _sum: { amountCharged: 'desc' } },
       take: 10,
     })
+
+    const userIds = grouped.map(g => g.userId)
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, email: true, fullName: true },
+    })
+    const userMap = Object.fromEntries(users.map(u => [u.id, u]))
+
+    return grouped.map(g => ({
+      userId: g.userId,
+      email: userMap[g.userId]?.email ?? '—',
+      fullName: userMap[g.userId]?.fullName ?? '—',
+      totalSpent: Number(g._sum.amountCharged ?? 0),
+    }))
   }
 }

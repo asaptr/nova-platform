@@ -7,6 +7,26 @@ import { MikrotikService } from '../../mikrotik/mikrotik.service'
 import { DnsmasqService } from '../../dnsmasq/dnsmasq.service'
 import { NotificationsService } from '../../notifications/notifications.service'
 import { ConfigService } from '@nestjs/config'
+import { VmMotdService } from '../vm-motd.service'
+import { SystemConfigService } from '../../system-config/system-config.service'
+
+// ── CIDR helpers ──────────────────────────────────────────────────────────────
+function ipToNum(ip: string): number {
+  return ip.split('.').reduce((acc, o) => ((acc << 8) | parseInt(o)) >>> 0, 0) >>> 0
+}
+function numToIp(n: number): string {
+  return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff].join('.')
+}
+function parseCidr(cidr: string) {
+  const [ipPart, prefixStr] = cidr.split('/')
+  const prefix = parseInt(prefixStr ?? '24')
+  const totalHosts = Math.pow(2, 32 - prefix)
+  const mask = (~(totalHosts - 1)) >>> 0
+  const networkNum = (ipToNum(ipPart) & mask) >>> 0
+  const broadcastNum = (networkNum + totalHosts - 1) >>> 0
+  return { networkNum, broadcastNum, prefix, gateway: numToIp(networkNum + 1) }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Processor('vm-provision')
 export class ProvisionJob {
@@ -19,12 +39,17 @@ export class ProvisionJob {
     private dnsmasq: DnsmasqService,
     private notifications: NotificationsService,
     private config: ConfigService,
+    private vmMotd: VmMotdService,
+    private systemConfig: SystemConfigService,
   ) {}
 
   @Process('provision')
   async handle(job: Job) {
     const { vmId, userId, packageId, displayId, hostname, osTemplate, templateType, ipType, rootPassword } = job.data
-    const node = this.config.get('PROXMOX_NODE')
+
+    // Proxmox node: DB > env
+    const node = (await this.systemConfig.get('proxmox.node').catch(() => null))
+      || this.config.get('PROXMOX_NODE')
     this.logger.log(`Provisioning VM ${displayId} (${vmId}) mode=${templateType ?? 'clone'}`)
 
     const step = (s: string) => this.logger.log(`[${displayId}] STEP: ${s}`)
@@ -36,24 +61,51 @@ export class ProvisionJob {
       const pkg = await this.prisma.package.findUnique({ where: { id: packageId } })
       step(`pkg loaded: vcpu=${pkg.vcpu} ram=${pkg.ramMb} disk=${pkg.diskGb}`)
 
-      const vmid = await this.proxmox.getNextVmid()
-      step(`next vmid: ${vmid}`)
+      // Cross-check PVE nextid with DB to handle permission gaps or race conditions
+      const pveNextVmid = await this.proxmox.getNextVmid()
+      const lastVm = await this.prisma.vm.findFirst({
+        where: { proxmoxVmid: { not: null } },
+        orderBy: { proxmoxVmid: 'desc' },
+        select: { proxmoxVmid: true },
+      })
+      const vmid = Math.max(pveNextVmid, (lastVm?.proxmoxVmid ?? 9999) + 1)
+      step(`next vmid: ${vmid} (pve=${pveNextVmid} dbMax=${lastVm?.proxmoxVmid ?? 'none'})`)
+
+      // Read NAT / network config from DB, fall back to env vars
+      const [dbNatBridge, dbPublicBridge, dbNatNetwork, dbDnsPrimary, dbDnsSecondary] = await Promise.all([
+        this.systemConfig.get('nat.bridge').catch(() => null),
+        this.systemConfig.get('public.bridge').catch(() => null),
+        this.systemConfig.get('nat.network').catch(() => null),
+        this.systemConfig.get('nat.dns_primary').catch(() => null),
+        this.systemConfig.get('nat.dns_secondary').catch(() => null),
+      ])
+
+      const natBridge    = dbNatBridge    || this.config.get('NAT_BRIDGE')    || 'vmbr1'
+      const publicBridge = dbPublicBridge || this.config.get('PUBLIC_BRIDGE') || 'vmbr0'
+      const natNetwork   = dbNatNetwork   || '10.20.0.0/24'
+      const dnsPrimary   = dbDnsPrimary   || '1.1.1.1'
+      const dnsSecondary = dbDnsSecondary || '8.8.8.8'
+
+      const bridge = ipType === 'nat' ? natBridge : publicBridge
+      step(`bridge: ${bridge}`)
 
       let ip: string | undefined
       let sshPort: number | undefined
-      const bridge = ipType === 'nat'
-        ? this.config.get('NAT_BRIDGE')
-        : this.config.get('PUBLIC_BRIDGE')
-      step(`bridge: ${bridge}`)
-
       let ipconfig: string | undefined
+
       if (ipType === 'nat') {
-        const lastOctet = await this.allocateNatIpAtomic()
-        ip = `10.20.0.${lastOctet}`
-        sshPort = 22000 + lastOctet
-        ipconfig = `ip=${ip}/24,gw=${this.config.get('NAT_GATEWAY')}`
+        const { ip: allocIp, sshPort: allocPort } = await this.allocateNatIpAtomic(natNetwork)
+        ip = allocIp
+        sshPort = allocPort
+
+        const { prefix, gateway } = parseCidr(natNetwork)
+        const natGateway = (await this.systemConfig.get('nat.gateway').catch(() => null))
+          || this.config.get('NAT_GATEWAY')
+          || gateway
+
+        ipconfig = `ip=${ip}/${prefix},gw=${natGateway}`
         step(`nat ip: ${ip} sshPort: ${sshPort}`)
-        // Reserve IP in DB immediately so concurrent jobs don't get the same octet
+        // Reserve IP in DB immediately so concurrent jobs don't get the same slot
         await this.prisma.vm.update({
           where: { id: vmId },
           data: { ipAddress: ip, sshPort },
@@ -75,33 +127,48 @@ export class ProvisionJob {
         await this.proxmox.waitForTask(node, upid)
         step('clone task complete')
 
-        // Step 1: fix hardware first (remove serial0 VGA, set std VGA + specs)
-        // Must be done in a separate call before cloud-init config
-        step('updateVmConfig hardware (cpu/ram/vga)')
+        step('updateVmConfig hardware (cpu/ram/balloon/autostart)')
         await this.proxmox.updateVmConfig(node, vmid, {
           cores: pkg.vcpu,
           memory: Number(pkg.ramMb),
-          vga: 'std',
-          delete: 'serial0',  // remove serial0 device so vga:std takes effect cleanly
-        }).catch((e) => {
-          this.logger.warn(`[${displayId}] hardware config warn: ${e.response?.data?.errors ?? e.message}`)
+          balloon: 0,
+          onboot: 1,
         })
 
-        // Step 2: cloud-init + network config
+        step('updateVmConfig vga → std')
+        await this.proxmox.updateVmConfig(node, vmid, { vga: 'std' })
+          .catch((e) => {
+            const msg = e.response?.data?.message ?? e.response?.data?.errors ?? e.message
+            this.logger.warn(`[${displayId}] vga config FAILED (check VM.Config.HWType permission on Proxmox token): ${msg}`)
+          })
+
+        step('updateVmConfig serial0 → socket')
+        await this.proxmox.updateVmConfig(node, vmid, { serial0: 'socket' })
+          .catch(() => {})
+
+        // cloud-init + network config
         const configUpdate: Record<string, any> = {
           name: displayId,
           ciuser: 'root',
           cipassword: rootPassword,
         }
         if (ipconfig) configUpdate.ipconfig0 = ipconfig
+        configUpdate.nameserver = [dnsPrimary, dnsSecondary].filter(Boolean).join(' ')
         if (bridge) configUpdate.net0 = `virtio,bridge=${bridge}`
         step(`updateVmConfig cloud-init: ipconfig=${ipconfig ?? 'none'} net0=${bridge ?? 'skip'}`)
         await this.proxmox.updateVmConfig(node, vmid, configUpdate)
 
         step('resizeDisk')
-        await this.proxmox.resizeDisk(node, vmid, Number(pkg.diskGb)).catch((e) => {
-          this.logger.warn(`[${displayId}] Disk resize skipped: ${e.response?.data?.errors ?? e.message}`)
-        })
+        try {
+          const vmCfgForDisk = await this.proxmox.getVmConfig(node, vmid)
+          const bootDisk = vmCfgForDisk.bootdisk
+            ?? (['scsi0', 'virtio0', 'sata0', 'ide0'] as const).find(k => vmCfgForDisk[k])
+            ?? 'scsi0'
+          step(`resizeDisk: ${bootDisk} → ${pkg.diskGb}G`)
+          await this.proxmox.resizeDisk(node, vmid, Number(pkg.diskGb), bootDisk)
+        } catch (e: any) {
+          this.logger.warn(`[${displayId}] Disk resize failed: ${e.response?.data?.errors ?? e.message}`)
+        }
       } else {
         step('createVmRaw (ISO mode)')
         const body: Record<string, any> = {
@@ -144,7 +211,6 @@ export class ProvisionJob {
       step('startVm')
       await this.proxmox.startVm(node, vmid)
 
-      // Save proxmoxVmid + IP early — so dashboard shows data even if agent is slow
       step('saving vmid and IP to DB')
       await this.prisma.vm.update({
         where: { id: vmId },
@@ -159,9 +225,23 @@ export class ProvisionJob {
       if (mode === 'clone') {
         step('waitForAgent (120s) — optional, password already set via cloud-init')
         await this.proxmox.waitForAgent(node, vmid, 120_000).then(async () => {
-          step('agent ready — setHostname via agent')
+          step('agent ready — setHostname + MOTD via agent')
           await this.proxmox.setHostname(node, vmid, hostname).catch((e) => {
             this.logger.warn(`[${displayId}] setHostname via agent failed: ${e.message}`)
+          })
+
+          const brand = await this.systemConfig.getBrandConfig().catch(() => ({ name: 'NOVA' }))
+          const domainBase = await this.systemConfig.get('domain.base').catch(() => '') ?? ''
+          const panelUrl = domainBase ? `https://app.${domainBase.replace(/^https?:\/\//, '')}` : (this.config.get('FRONTEND_URL') ?? '')
+          await this.vmMotd.writeToVm(node, vmid, brand.name || 'NOVA', panelUrl).catch((e) => {
+            this.logger.warn(`[${displayId}] MOTD write failed: ${e.message}`)
+          })
+          await this.vmMotd.writeRestrictionsToVm(node, vmid).catch((e) => {
+            this.logger.warn(`[${displayId}] Restrictions write failed: ${e.message}`)
+          })
+          const timezone = await this.systemConfig.get('brand.timezone').catch(() => null)
+          await this.vmMotd.syncTimezoneToVm(node, vmid, timezone ?? 'Asia/Jakarta').catch((e) => {
+            this.logger.warn(`[${displayId}] Timezone/NTP sync failed: ${e.message}`)
           })
         }).catch((e) => {
           this.logger.warn(`[${displayId}] Agent tidak ready (${e.message}), password sudah di-set via cloud-init`)
@@ -195,22 +275,33 @@ export class ProvisionJob {
     }
   }
 
-  private async allocateNatIpAtomic(): Promise<number> {
-    // Check both NatPortForward records AND vm.ipAddress to handle concurrent provisioning
-    const [forwards, vms] = await Promise.all([
-      this.prisma.natPortForward.findMany({ select: { externalPort: true } }),
-      // Include failed VMs — their IP stays reserved until explicitly deleted
-      this.prisma.vm.findMany({
-        where: { ipAddress: { startsWith: '10.20.0.' }, status: { not: 'deleted' } },
-        select: { ipAddress: true },
-      }),
-    ])
-    const usedOctets = new Set([
-      ...forwards.map(r => r.externalPort - 22000),
-      ...vms.map(v => parseInt(v.ipAddress!.split('.')[3])).filter(n => !isNaN(n)),
-    ])
-    for (let i = 2; i <= 254; i++) {
-      if (!usedOctets.has(i)) return i
+  private async allocateNatIpAtomic(natNetwork: string): Promise<{ ip: string; sshPort: number }> {
+    const { networkNum, broadcastNum } = parseCidr(natNetwork)
+
+    // Collect all used IPs and SSH ports from non-deleted VMs
+    const vms = await this.prisma.vm.findMany({
+      where: { status: { not: 'deleted' }, ipAddress: { not: null } },
+      select: { ipAddress: true, sshPort: true },
+    })
+    const usedIps  = new Set(vms.map(v => v.ipAddress!))
+    const usedPorts = new Set(vms.map(v => v.sshPort).filter(Boolean) as number[])
+
+    // Additionally check natPortForward for any orphaned port reservations
+    const forwards = await this.prisma.natPortForward.findMany({ select: { externalPort: true } })
+    forwards.forEach(f => usedPorts.add(f.externalPort))
+
+    // Find first free IP (skip network addr +0 and gateway +1)
+    for (let ipNum = networkNum + 2; ipNum < broadcastNum; ipNum++) {
+      const candidate = numToIp(ipNum)
+      if (usedIps.has(candidate)) continue
+
+      // Find next free SSH port starting from base
+      const portBase = 22000
+      let sshPort = portBase + 1
+      while (usedPorts.has(sshPort) && sshPort < portBase + 10000) sshPort++
+      if (sshPort >= portBase + 10000) throw new Error('Port SSH pool penuh')
+
+      return { ip: candidate, sshPort }
     }
     throw new Error('NAT IP pool penuh')
   }

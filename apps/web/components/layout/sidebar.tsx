@@ -30,7 +30,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-60 min-h-screen flex flex-col bg-card border-r border-border">
+    <aside className="w-60 h-full flex flex-col bg-card border-r border-border overflow-y-auto">
       <Link href="/vms" className="flex items-center gap-2 px-5 py-5 border-b border-border hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
         <Cloud size={22} className="text-accent flex-shrink-0" />
         <span className="font-semibold text-lg tracking-tight truncate">{brandName}</span>

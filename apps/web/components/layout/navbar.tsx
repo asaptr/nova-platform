@@ -1,9 +1,9 @@
 'use client'
 import { ThemeToggle } from './theme-toggle'
-import { Bell } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { formatRupiah } from '@/lib/utils'
 import api from '@/lib/api'
+import { NotificationBell } from '@/components/ui/notification-bell'
 
 export function Navbar() {
   const [balance, setBalance] = useState<number | null>(null)
@@ -13,7 +13,7 @@ export function Navbar() {
   }, [])
 
   return (
-    <header className="h-14 border-b border-border bg-card/80 backdrop-blur-sm flex items-center justify-between px-5">
+    <header className="h-14 shrink-0 border-b border-border bg-card/80 backdrop-blur-sm flex items-center justify-between px-5">
       <div />
       <div className="flex items-center gap-3">
         {balance !== null && (
@@ -22,9 +22,7 @@ export function Navbar() {
             <span className="font-semibold text-primary">{formatRupiah(balance)}</span>
           </div>
         )}
-        <button className="p-2 rounded-md text-muted hover:text-primary hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
-          <Bell size={18} />
-        </button>
+        <NotificationBell />
         <ThemeToggle />
       </div>
     </header>

@@ -1,9 +1,13 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
+import { InAppNotificationService } from '../notifications/in-app-notification.service'
 
 @Injectable()
 export class TicketsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private inAppNotif: InAppNotificationService,
+  ) {}
 
   async createTicket(userId: string, data: { subject: string; vmId?: string; priority?: string; firstMessage: string }) {
     const ticket = await this.prisma.ticket.create({
@@ -20,8 +24,18 @@ export class TicketsService {
           },
         },
       },
-      include: { messages: true },
+      include: { messages: true, user: true },
     })
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true, email: true } })
+    const displayName = user?.fullName || user?.email || 'User'
+    await this.inAppNotif.createForAdmins(
+      'ticket_created',
+      'Tiket Baru',
+      `${displayName} membuat tiket baru: ${data.subject}`,
+      `/tickets/${ticket.id}`,
+    )
+
     return ticket
   }
 
@@ -71,6 +85,15 @@ export class TicketsService {
       where: { id: ticketId },
       data: { status: ticket.status === 'resolved' ? 'open' : ticket.status, updatedAt: new Date() },
     })
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true, email: true } })
+    const displayName = user?.fullName || user?.email || 'User'
+    await this.inAppNotif.createForAdmins(
+      'ticket_reply_user',
+      'Balasan Tiket',
+      `${displayName} membalas tiket: ${ticket.subject}`,
+      `/tickets/${ticketId}`,
+    )
 
     return msg
   }

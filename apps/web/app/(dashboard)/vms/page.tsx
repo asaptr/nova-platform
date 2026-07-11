@@ -4,7 +4,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { VmCard } from '@/components/vm/vm-card'
 import { Plus } from 'lucide-react'
-import type { Vm } from '@langitnode/types'
+import type { Vm } from '@nova/types'
 
 export default function VmsPage() {
   const [vms, setVms] = useState<Vm[]>([])
@@ -15,7 +15,7 @@ export default function VmsPage() {
   }, [])
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5 max-w-5xl">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">VM Saya</h1>
@@ -30,7 +30,7 @@ export default function VmsPage() {
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {[1,2,3].map(i => <div key={i} className="h-44 bg-card border border-border rounded-xl animate-pulse" />)}
         </div>
       ) : vms.length === 0 ? (
@@ -41,7 +41,7 @@ export default function VmsPage() {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {vms.map(vm => <VmCard key={vm.id} vm={vm} />)}
         </div>
       )}

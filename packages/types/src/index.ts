@@ -1,4 +1,4 @@
-export type VmStatus = 'pending' | 'provisioning' | 'running' | 'stopped' | 'suspended' | 'deleted' | 'failed'
+export type VmStatus = 'pending' | 'provisioning' | 'running' | 'stopped' | 'suspended' | 'deleted' | 'failed' | 'starting' | 'stopping' | 'rebooting'
 export type IpType = 'nat' | 'public'
 export type UserStatus = 'active' | 'suspended' | 'banned'
 export type TransactionType = 'topup' | 'debit' | 'refund' | 'adjustment'

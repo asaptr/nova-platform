@@ -1,18 +1,26 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import api from '@/lib/api'
-import type { Vm } from '@langitnode/types'
+import type { Vm, VmStatus } from '@nova/types'
 
-const ACTIVE_STATUSES = ['pending', 'provisioning', 'running', 'stopped', 'suspended']
+const POLL_STATUSES: VmStatus[] = ['pending', 'provisioning', 'running', 'stopped', 'suspended', 'starting', 'stopping', 'rebooting']
 
-export function useVmStatus(vmId: string, intervalMs = 5000) {
+export function useVmStatus(vmId: string, intervalMs = 4000) {
   const [vm, setVm] = useState<Vm | null>(null)
   const [loading, setLoading] = useState(true)
+  const prevStatusRef = useRef<VmStatus | null>(null)
+  const onTransitionRef = useRef<((from: VmStatus, to: VmStatus) => void) | null>(null)
 
   const refetch = useCallback(async () => {
     try {
       const { data } = await api.get(`/vms/${vmId}`)
-      setVm(data)
+      setVm(prev => {
+        const newStatus: VmStatus = data.status
+        if (prev && prev.status !== newStatus && onTransitionRef.current) {
+          onTransitionRef.current(prev.status, newStatus)
+        }
+        return data
+      })
     } catch {
       // ignore
     } finally {
@@ -23,11 +31,15 @@ export function useVmStatus(vmId: string, intervalMs = 5000) {
   useEffect(() => {
     refetch()
     const id = setInterval(() => {
-      if (vm && !ACTIVE_STATUSES.includes(vm.status)) return
+      if (vm && !POLL_STATUSES.includes(vm.status as VmStatus)) return
       refetch()
     }, intervalMs)
     return () => clearInterval(id)
   }, [refetch, intervalMs, vm?.status])
 
-  return { vm, loading, refetch }
+  const onTransition = useCallback((fn: (from: VmStatus, to: VmStatus) => void) => {
+    onTransitionRef.current = fn
+  }, [])
+
+  return { vm, loading, refetch, onTransition }
 }

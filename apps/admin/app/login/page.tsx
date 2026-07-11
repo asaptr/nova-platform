@@ -1,15 +1,22 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { Shield } from 'lucide-react'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1'
 
 export default function AdminLoginPage() {
   const router = useRouter()
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [brandName, setBrandName] = useState('NOVA')
+
+  useEffect(() => {
+    fetch(`${API}/brand`).then(r => r.json()).then(d => { if (d?.name) setBrandName(d.name) }).catch(() => {})
+  }, [])
 
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setLoading(true); setError(null)
@@ -35,7 +42,7 @@ export default function AdminLoginPage() {
             <Shield size={28} className="text-accent" />
           </div>
           <h1 className="text-2xl font-bold">Admin Login</h1>
-          <p className="text-sm text-muted">NOVA — Panel Operator</p>
+          <p className="text-sm text-muted">{brandName} — Panel Operator</p>
         </div>
         <form onSubmit={submit} className="bg-card border border-border rounded-xl p-6 space-y-4">
           <div className="space-y-1.5">

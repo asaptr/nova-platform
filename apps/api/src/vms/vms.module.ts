@@ -4,9 +4,12 @@ import { ConfigService } from '@nestjs/config'
 import { VmsService } from './vms.service'
 import { VmsController } from './vms.controller'
 import { ProvisionJob } from './vm-jobs/provision.job'
+import { VmStatusSyncJob } from './vm-jobs/vm-status-sync.job'
+import { VmMotdService } from './vm-motd.service'
 import { ProxmoxModule } from '../proxmox/proxmox.module'
 import { MikrotikModule } from '../mikrotik/mikrotik.module'
 import { DnsmasqModule } from '../dnsmasq/dnsmasq.module'
+import { SystemConfigModule } from '../system-config/system-config.module'
 
 @Module({
   imports: [
@@ -23,9 +26,10 @@ import { DnsmasqModule } from '../dnsmasq/dnsmasq.module'
     ProxmoxModule,
     MikrotikModule,
     DnsmasqModule,
+    SystemConfigModule,
   ],
-  providers: [VmsService, ProvisionJob],
+  providers: [VmsService, ProvisionJob, VmMotdService, VmStatusSyncJob],
   controllers: [VmsController],
-  exports: [VmsService],
+  exports: [VmsService, VmMotdService],
 })
 export class VmsModule {}

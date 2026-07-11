@@ -11,6 +11,7 @@ import { RolesGuard } from '../common/guards/roles.guard'
 import { Roles } from '../common/decorators/roles.decorator'
 import { CurrentUser } from '../common/decorators/current-user.decorator'
 import { PrismaService } from '../prisma/prisma.service'
+import { InAppNotificationService } from '../notifications/in-app-notification.service'
 
 const uploadDir = join(process.cwd(), 'uploads', 'tickets')
 
@@ -18,7 +19,10 @@ const uploadDir = join(process.cwd(), 'uploads', 'tickets')
 @UseGuards(AdminJwtGuard, RolesGuard)
 @Roles('admin', 'superadmin')
 export class AdminTicketsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private inAppNotif: InAppNotificationService,
+  ) {}
 
   @Get()
   async list(
@@ -85,7 +89,13 @@ export class AdminTicketsController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const attachmentUrl = file ? `/uploads/tickets/${file.filename}` : undefined
-    return this.prisma.ticketMessage.create({
+
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id },
+      select: { userId: true, subject: true },
+    })
+
+    const msg = await this.prisma.ticketMessage.create({
       data: {
         ticketId: id,
         senderType: 'admin',
@@ -94,6 +104,18 @@ export class AdminTicketsController {
         attachmentUrl,
       },
     })
+
+    if (ticket) {
+      await this.inAppNotif.createForUser(
+        ticket.userId,
+        'ticket_reply_admin',
+        'Admin Membalas Tiket Anda',
+        `Tiket "${ticket.subject}" mendapat balasan dari admin.`,
+        `/support/${id}`,
+      )
+    }
+
+    return msg
   }
 
   @Patch(':id')

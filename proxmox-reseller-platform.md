@@ -1,10 +1,10 @@
-# Langit Node — Dokumen Perencanaan Platform
+# NOVA — Dokumen Perencanaan Platform
 
-> **Langit Node** adalah platform VPS cloud provider self-service berbasis Proxmox. User register, topup saldo, pilih paket, dan deploy VM secara mandiri — tanpa intervensi manual dari operator. Dilengkapi admin panel untuk monitoring, VM management, dan financial dashboard.
+> **NOVA** (Node Orchestration & Virtualization Architecture) adalah platform VPS cloud provider self-service berbasis Proxmox. User register, topup saldo, pilih paket, dan deploy VM secara mandiri — tanpa intervensi manual dari operator. Dilengkapi admin panel untuk monitoring, VM management, dan financial dashboard.
 >
-> **Jenis platform**: IaaS (Infrastructure as a Service) — bukan reseller. Langit Node memiliki dan mengoperasikan infrastruktur sendiri, lalu menjual compute resource langsung ke end user dalam bentuk VPS self-service.
+> **Jenis platform**: IaaS (Infrastructure as a Service) — bukan reseller. NOVA memiliki dan mengoperasikan infrastruktur sendiri, lalu menjual compute resource langsung ke end user dalam bentuk VPS self-service.
 >
-> **Domain**: langitnode.com / langitnode.id
+> **Versi**: NOVA Andromeda v1.0 | **Deployment**: LXC + PM2 + Nginx di atas Proxmox VE 8.x | Lihat `SETUP.md` untuk panduan fresh install.
 
 ---
 
@@ -114,8 +114,7 @@ Platform terbagi menjadi 4 layer utama yang terisolasi satu sama lain:
 | Payment | Midtrans / Xendit | Support metode Indonesia (VA, QRIS) |
 | Proxmox wrapper | Axios + Proxmox API token | Isolasi akses, bisa di-rate-limit |
 | Monitoring | Prometheus + Grafana | Metrics resource VM dan sistem |
-| Deploy | Docker + Nginx | Portabel, mudah di-scale |
-| Infra konfigurasi | Ansible | Reproducible setup untuk scale-out |
+| Deploy | LXC Container + PM2 + Nginx | Ringan, langsung di atas Proxmox |
 | Console VM | noVNC (via Proxmox) | Akses langsung ke VM untuk tshoot |
 
 ---
@@ -316,23 +315,30 @@ CREATE INDEX idx_tickets_assigned_to ON tickets(assigned_to);
     Notifikasi email + in-app dikirim
 ```
 
-### Siklus billing (model prepaid)
+### Siklus billing (model pay-as-you-go prepaid)
 
 ```
 Setiap jam: cron job cek semua VM aktif
   → Potong saldo sesuai price_hourly paket
   → Catat di billing_usage
+  → Saldo boleh go negative (grace period 2 jam usage)
 
-Jika saldo < threshold (misal Rp 10.000):
-  → Kirim notifikasi warning ke user
+Jika saldo < 0 tapi masih dalam grace:
+  → Kirim email warning ke user
 
-Jika saldo = 0:
-  → VM di-suspend otomatis
-  → User diberi grace period 3 hari untuk topup
+Jika saldo <= -(price_hourly × 2):
+  → VM di-suspend otomatis (force stop di Proxmox)
+  → MikroTik NAT ports di-disable
+  → expiresAt = sekarang + 7 hari
 
-Jika setelah 3 hari tidak topup:
-  → VM dihapus permanen
+Jika setelah 7 hari tidak topup (expiresAt terlewat):
+  → VM dihapus permanen (stopVm + deleteVm + purge disk)
   → Data di Proxmox didelete
+
+Untuk menyalakan VM yang suspended:
+  → User harus topup sampai saldo >= 0 terlebih dahulu
+
+Catatan: tidak ada deposit saat buat VM. Syarat buat VM: saldo >= 0.
 ```
 
 ---

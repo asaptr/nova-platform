@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { formatRupiah } from '@/lib/utils'
-import type { Package } from '@langitnode/types'
+import type { Package } from '@nova/types'
 import { RefreshCw } from 'lucide-react'
 
 type OsTemplate = { id: string; name: string; description: string | null; osFamily: string; proxmoxValue: string }

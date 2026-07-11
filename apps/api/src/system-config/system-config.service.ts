@@ -5,12 +5,14 @@ export interface BrandConfig {
   name: string
   tagline: string
   logoUrl: string
+  timezone: string
 }
 
 const DEFAULTS: Record<string, string> = {
   'brand.name': '',
   'brand.tagline': 'Node Orchestration & Virtualization Architecture',
   'brand.logo_url': '',
+  'brand.timezone': 'Asia/Jakarta',
   'domain.base': '',
   'proxmox.host': '',
   'proxmox.port': '8006',
@@ -22,8 +24,12 @@ const DEFAULTS: Record<string, string> = {
   'mikrotik.user': '',
   'mikrotik.pass': '',
   'nat.bridge': 'vmbr1',
-  'nat.gateway': '10.20.0.1',
+  'nat.gateway': '',
+  'nat.network': '10.20.0.0/24',
   'nat.public_ip': '',
+  'nat.dns_primary': '1.1.1.1',
+  'nat.dns_secondary': '1.0.0.1',
+  'public.bridge': 'vmbr0',
 }
 
 const MASKED = '••••••••'
@@ -85,12 +91,13 @@ export class SystemConfigService implements OnModuleInit {
   }
 
   async getBrandConfig(): Promise<BrandConfig> {
-    const keys = ['brand.name', 'brand.tagline', 'brand.logo_url']
+    const keys = ['brand.name', 'brand.tagline', 'brand.logo_url', 'brand.timezone']
     const cfg = await this.getMany(keys)
     return {
       name: cfg['brand.name'] || '',
       tagline: cfg['brand.tagline'] || 'Node Orchestration & Virtualization Architecture',
       logoUrl: cfg['brand.logo_url'] || '',
+      timezone: cfg['brand.timezone'] || 'Asia/Jakarta',
     }
   }
 

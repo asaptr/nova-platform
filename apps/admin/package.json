@@ -1,5 +1,5 @@
 {
-  "name": "@langitnode/admin",
+  "name": "@nova/admin",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -10,17 +10,20 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@langitnode/types": "workspace:*",
-    "next": "^14.2.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "next-themes": "^0.3.0",
+    "@nova/types": "workspace:*",
+    "@novnc/novnc": "^1.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
     "axios": "^1.7.2",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^2.3.0",
     "lucide-react": "^0.395.0",
+    "next": "^14.2.4",
+    "next-themes": "^0.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "recharts": "^2.12.7",
-    "@novnc/novnc": "^1.7.0"
+    "tailwind-merge": "^2.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",

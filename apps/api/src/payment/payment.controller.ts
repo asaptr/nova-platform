@@ -2,6 +2,7 @@ import { Controller, Post, Body, Get, Query, UseGuards, BadRequestException, Log
 import { MidtransService } from './midtrans.service'
 import { PrismaService } from '../prisma/prisma.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { InAppNotificationService } from '../notifications/in-app-notification.service'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 import { CurrentUser } from '../common/decorators/current-user.decorator'
 
@@ -13,6 +14,7 @@ export class PaymentController {
     private midtrans: MidtransService,
     private prisma: PrismaService,
     private notifications: NotificationsService,
+    private inAppNotif: InAppNotificationService,
   ) {}
 
   @Post('topup')
@@ -79,8 +81,30 @@ export class PaymentController {
         }),
       ])
 
+      const fmt = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(Number(tx.amount))
       await this.notifications.sendTopupSuccess(tx.user.email, Number(tx.amount))
+      await this.inAppNotif.createForUser(
+        tx.userId,
+        'topup_success',
+        'Topup Berhasil',
+        `Saldo Anda berhasil ditambahkan sebesar ${fmt}.`,
+        '/billing',
+      )
       this.logger.log(`Topup success: ${tx.amount} for user ${tx.userId}`)
+    } else if (body.transaction_status === 'deny' || body.transaction_status === 'cancel' || body.transaction_status === 'expire') {
+      const tx = await this.prisma.transaction.findFirst({
+        where: { paymentRef: body.order_id, status: 'pending' },
+      })
+      if (tx) {
+        await this.prisma.transaction.update({ where: { id: tx.id }, data: { status: 'failed' } })
+        await this.inAppNotif.createForUser(
+          tx.userId,
+          'topup_failed',
+          'Topup Gagal',
+          'Pembayaran topup tidak berhasil. Silakan coba lagi.',
+          '/billing',
+        )
+      }
     }
 
     return { received: true }

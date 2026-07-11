@@ -1,14 +1,13 @@
 import { AdminSidebar } from '@/components/layout/sidebar'
+import { AdminNavbar } from '@/components/layout/navbar'
 
 export default function AdminDashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
       <AdminSidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 border-b border-border bg-card/80 backdrop-blur-sm flex items-center px-6">
-          <span className="text-sm text-muted">Admin Panel</span>
-        </header>
-        <main className="flex-1 p-6">{children}</main>
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <AdminNavbar />
+        <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
   )

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import { AlertTriangle } from 'lucide-react'
 
 function ProgressBar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
@@ -23,11 +24,18 @@ function ProgressBar({ value, max }: { value: number; max: number }) {
 export default function AdminNodesPage() {
   const [nodes, setNodes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   async function load() {
-    const { data } = await api.get('/admin/nodes')
-    setNodes(data)
-    setLoading(false)
+    try {
+      const { data } = await api.get('/admin/nodes')
+      setNodes(Array.isArray(data) ? data : [])
+      setError(null)
+    } catch (e: any) {
+      setError(e.response?.data?.message ?? e.message ?? 'Gagal memuat node')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -52,7 +60,14 @@ export default function AdminNodesPage() {
         <button onClick={load} className="text-xs text-accent hover:underline">Refresh</button>
       </div>
 
-      {nodes.length === 0 && (
+      {error && (
+        <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-xl px-4 py-3">
+          <AlertTriangle size={15} className="shrink-0" />
+          <span>{error}</span>
+          <button onClick={load} className="ml-auto text-xs underline">Coba lagi</button>
+        </div>
+      )}
+      {!error && nodes.length === 0 && (
         <p className="text-muted text-sm">Tidak ada node ditemukan.</p>
       )}
 

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
 import { Plus, AlertCircle, AlertTriangle, Info, Minus } from 'lucide-react'
-import type { Ticket } from '@langitnode/types'
+import type { Ticket } from '@nova/types'
 
 const statusColor: Record<string, string> = {
   open: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300',

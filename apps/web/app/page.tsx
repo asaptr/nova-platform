@@ -1,18 +1,15 @@
 import Link from 'next/link'
-import { Server, Shield, Zap, Globe, ArrowRight } from 'lucide-react'
+import { Shield, Zap, Globe, ArrowRight } from 'lucide-react'
 import { LandingNavbar } from '@/components/layout/landing-navbar'
 import { PricingSection } from '@/components/landing/pricing-section'
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000/api/v1'
 
 const features = [
   {
     icon: Zap,
     title: 'Deploy dalam 60 Detik',
     desc: 'VM siap pakai dalam hitungan detik. Pilih paket, pilih OS, set password — selesai.',
-  },
-  {
-    icon: Server,
-    title: 'Berbasis Proxmox VE',
-    desc: 'Infrastruktur enterprise-grade dengan KVM virtualization. Performa bare-metal, harga terjangkau.',
   },
   {
     icon: Shield,
@@ -26,18 +23,23 @@ const features = [
   },
 ]
 
-
-export default function LandingPage() {
+export default async function LandingPage() {
+  const brandName = await fetch(`${API}/brand`, { cache: 'no-store' })
+    .then(r => r.json())
+    .then(d => d?.name || 'NOVA')
+    .catch(() => 'NOVA')
   return (
     <div className="min-h-screen bg-background text-primary">
       <LandingNavbar />
 
       {/* Hero */}
       <section className="max-w-5xl mx-auto px-6 pt-20 pb-16 text-center">
+        {/*}
         <div className="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-accent/10 text-accent font-medium mb-6">
           <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
           Self-service VPS berbasis Proxmox
         </div>
+        */}
         <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-5">
           Cloud VPS Indonesia<br />
           <span className="text-accent">Murah, Cepat, Transparan</span>
@@ -60,7 +62,7 @@ export default function LandingPage() {
 
       {/* Features */}
       <section className="max-w-5xl mx-auto px-6 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {features.map(({ icon: Icon, title, desc }) => (
             <div key={title} className="bg-card border border-border rounded-xl p-6 flex gap-4">
               <div className="p-2.5 rounded-lg bg-accent/10 shrink-0 h-fit">
@@ -99,7 +101,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-border">
         <div className="max-w-5xl mx-auto px-6 py-8 flex items-center justify-between text-sm text-muted">
-          <p>© {new Date().getFullYear()} NOVA. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {brandName}. All rights reserved.</p>
           <div className="flex gap-4">
             <Link href="/login" className="hover:text-primary transition-colors">Masuk</Link>
             <Link href="/register" className="hover:text-primary transition-colors">Daftar</Link>

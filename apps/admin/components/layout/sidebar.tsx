@@ -4,7 +4,6 @@ import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Server, Users, Ticket, BarChart3, Settings, LogOut, Shield, HardDrive, Cog } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEffect, useState } from 'react'
-import { ThemeToggle } from './theme-toggle'
 
 const nav = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -39,7 +38,7 @@ export function AdminSidebar() {
   }
 
   return (
-    <aside className="w-60 min-h-screen flex flex-col bg-card border-r border-border">
+    <aside className="w-60 h-full flex flex-col bg-card border-r border-border overflow-y-auto">
       <Link href="/" className="flex items-center gap-2 px-5 py-5 border-b border-border hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
         <Shield size={20} className="text-accent flex-shrink-0" />
         <div className="min-w-0">
@@ -63,11 +62,7 @@ export function AdminSidebar() {
           </Link>
         ))}
       </nav>
-      <div className="px-3 pb-4 space-y-0.5">
-        <div className="flex items-center justify-between px-3 py-2">
-          <span className="text-xs text-muted">Tema</span>
-          <ThemeToggle />
-        </div>
+      <div className="px-3 pb-4">
         <button onClick={logout} className="flex items-center gap-3 px-3 py-2 w-full rounded-md text-sm text-muted hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
           <LogOut size={16} /> Keluar
         </button>

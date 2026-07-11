@@ -4,7 +4,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import { BalanceCard } from '@/components/billing/balance-card'
 import { formatRupiah, formatDate } from '@/lib/utils'
-import type { Transaction, User } from '@langitnode/types'
+import type { Transaction, User } from '@nova/types'
 import { ArrowUpRight, ArrowDownLeft, Clock } from 'lucide-react'
 
 const TX_TYPES = [
@@ -48,8 +48,13 @@ export default function BillingPage() {
   }, [tab, typeFilter])
 
   return (
-    <div className="space-y-5 max-w-2xl">
-      <h1 className="text-2xl font-bold">Billing</h1>
+    <div className="space-y-5 max-w-4xl">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Billing</h1>
+        <Link href="/billing/topup" className="flex items-center gap-1.5 bg-accent text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity">
+          + Topup
+        </Link>
+      </div>
 
       {user && <BalanceCard balance={Number(user.balance)} />}
 
@@ -70,11 +75,6 @@ export default function BillingPage() {
               {t.label}
             </button>
           ))}
-          {tab === 'transactions' && (
-            <div className="ml-auto px-4 flex items-center">
-              <Link href="/billing/topup" className="text-sm text-accent hover:underline">+ Topup</Link>
-            </div>
-          )}
         </div>
 
         {/* Transaction type filter */}

@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link'
-import type { Vm } from '@langitnode/types'
+import type { Vm } from '@nova/types'
 import { VmStatusBadge } from './vm-status-badge'
 import { Server, Copy, Monitor, AlertTriangle } from 'lucide-react'
 import { formatDate, formatOsName } from '@/lib/utils'
