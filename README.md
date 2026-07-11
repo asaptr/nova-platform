@@ -43,6 +43,24 @@ Routing domain:
 
 ---
 
+## Quick Start — Urutan Install
+
+Ikuti urutan ini dari awal sampai selesai:
+
+```
+1. Proxmox host  →  buat API token + bridge vmbr1 + VM template
+2. Proxmox host  →  buat LXC Debian 12 untuk NOVA app
+3. Di dalam LXC  →  install Docker
+4. Di dalam LXC  →  clone repo + isi .env + docker compose up
+5. Browser       →  db:push + db:seed (setup database pertama kali)
+6. Admin panel   →  ganti password, isi System Config, buat paket VM
+7. Cloudflare    →  setup Tunnel atau DNS + Nginx untuk domain
+```
+
+Detail setiap langkah ada di bagian-bagian di bawah.
+
+---
+
 ## Prasyarat
 
 - **Proxmox VE 9.x** (diinstall di server/baremetal)
