@@ -26,4 +26,4 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/apps/api/package.json ./package.json
 USER nestjs
 EXPOSE 3000
-CMD ["node", "dist/main"]
+CMD ["node", "dist/src/main"]
