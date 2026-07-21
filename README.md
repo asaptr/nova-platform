@@ -344,12 +344,12 @@ pm2 restart all
 SSH ke Proxmox host, jalankan ini pertama kali setelah install:
 
 ```bash
-# Nonaktifkan repo enterprise (butuh subscription berbayar)
-sed -i 's/^deb/#deb/' /etc/apt/sources.list.d/pve-enterprise.list
-sed -i 's/^deb/#deb/' /etc/apt/sources.list.d/ceph.list
+# Nonaktifkan repo enterprise (PVE 9 memakai format .sources atau .list — cari dulu)
+find /etc/apt/sources.list.d/ -name "*enterprise*" -delete
+find /etc/apt/sources.list.d/ -name "*ceph*" -delete
 
-# Tambah repo community (free)
-echo "deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription" \
+# Tambah repo community (free) — PVE 9 berbasis Debian Trixie
+echo "deb http://download.proxmox.com/debian/pve trixie pve-no-subscription" \
   > /etc/apt/sources.list.d/pve-community.list
 
 apt update && apt full-upgrade -y

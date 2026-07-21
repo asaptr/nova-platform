@@ -36,8 +36,8 @@ services:
 
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
     container_name: nova-api
     restart: unless-stopped
     depends_on:
@@ -58,8 +58,8 @@ services:
 
   web:
     build:
-      context: ./apps/web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/web/Dockerfile
     container_name: nova-web
     restart: unless-stopped
     depends_on:
@@ -71,8 +71,8 @@ services:
 
   admin:
     build:
-      context: ./apps/admin
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/admin/Dockerfile
     container_name: nova-admin
     restart: unless-stopped
     depends_on:
