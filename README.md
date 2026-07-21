@@ -129,6 +129,26 @@ docker --version
 docker compose version
 ```
 
+### Langkah 2b — Install Portainer (Docker GUI, opsional)
+
+Portainer memudahkan monitoring container, lihat log, dan restart service lewat browser.
+
+```bash
+docker volume create portainer_data
+
+docker run -d \
+  --name portainer \
+  --restart=always \
+  -p 9443:9443 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portainer_data:/data \
+  portainer/portainer-ce:latest
+```
+
+Akses Portainer di: `https://IP_LXC:9443`
+
+Buat password admin saat pertama buka, lalu pilih **"Get Started"** → **local** untuk manage Docker di LXC ini.
+
 ### Langkah 3 — Clone Repo & Setup
 
 ```bash
