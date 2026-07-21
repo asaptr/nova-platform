@@ -416,17 +416,17 @@ Template VM yang dipakai untuk clone **wajib** punya:
 - `qemu-guest-agent` terinstall dan aktif
 - Format disk yang support cloud-init (qcow2/raw, bukan vmdk)
 
-Contoh buat template Debian 12 minimal:
+Contoh buat template Debian 13 (Trixie) minimal:
 
 ```bash
 # Di Proxmox host
-# Download cloud image Debian 12
-wget -O /var/lib/vz/template/iso/debian-12-genericcloud-amd64.qcow2 \
-  https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2
+# Download cloud image Debian 13
+wget -O /var/lib/vz/template/iso/debian-13-genericcloud-amd64.qcow2 \
+  https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 
 # Buat VM template (VMID 9000)
-qm create 9000 --name debian-12-template --memory 1024 --cores 1 --net0 virtio,bridge=vmbr0
-qm importdisk 9000 /var/lib/vz/template/iso/debian-12-genericcloud-amd64.qcow2 local-lvm
+qm create 9000 --name debian-13-template --memory 1024 --cores 1 --net0 virtio,bridge=vmbr0
+qm importdisk 9000 /var/lib/vz/template/iso/debian-13-genericcloud-amd64.qcow2 local-lvm
 qm set 9000 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9000-disk-0
 qm set 9000 --ide2 local-lvm:cloudinit
 qm set 9000 --boot c --bootdisk scsi0
