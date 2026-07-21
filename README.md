@@ -80,15 +80,18 @@ Ada dua cara: **Docker Compose** (lebih mudah) atau **Manual / PM2** (lebih kont
 
 ### Langkah 1 — Buat LXC Container di Proxmox
 
-SSH ke Proxmox host, buat LXC Debian 12:
+SSH ke Proxmox host, buat LXC Debian 13:
 
 ```bash
-# Download template Debian 12 (skip jika sudah ada)
+# Cek nama template Debian 13 yang tersedia
 pveam update
-pveam download local debian-12-standard_12.7-1_amd64.tar.zst
+pveam available --section system | grep debian-13
+
+# Download (sesuaikan nama file dengan output di atas)
+pveam download local debian-13-standard_13.0-1_amd64.tar.zst
 
 # Buat LXC: 2 CPU, 4GB RAM, 40GB disk
-pct create 100 local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst \
+pct create 100 local:vztmpl/debian-13-standard_13.0-1_amd64.tar.zst \
   --hostname nova-app \
   --cores 2 \
   --memory 4096 \
