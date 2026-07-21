@@ -87,11 +87,11 @@ SSH ke Proxmox host, buat LXC Debian 13:
 pveam update
 pveam available --section system | grep debian-13
 
-# Download (sesuaikan nama file dengan output di atas)
-pveam download local debian-13-standard_13.0-1_amd64.tar.zst
+# Download template Debian 13
+pveam download local debian-13-standard_13.6-1_amd64.tar.zst
 
 # Buat LXC: 2 CPU, 4GB RAM, 40GB disk
-pct create 100 local:vztmpl/debian-13-standard_13.0-1_amd64.tar.zst \
+pct create 100 local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst \
   --hostname nova-app \
   --cores 2 \
   --memory 4096 \
