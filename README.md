@@ -54,7 +54,7 @@ Ikuti urutan ini dari awal sampai selesai:
 4. Di dalam LXC  →  clone repo + isi .env + docker compose up
 5. Browser       →  db:push + db:seed (setup database pertama kali)
 6. Admin panel   →  ganti password, isi System Config, buat paket VM
-7. Cloudflare    →  setup Tunnel atau DNS + Nginx untuk domain
+7. Cloudflare    →  buat tunnel di dashboard, copy token ke .env, docker compose up -d cloudflared
 ```
 
 Detail setiap langkah ada di bagian-bagian di bawah.
@@ -468,61 +468,42 @@ Gunakan VMID `9000` sebagai `osTemplate` saat buat paket di admin panel.
 
 Ada dua opsi untuk expose NOVA ke internet:
 
-### Opsi A — Cloudflare Tunnel (Rekomendasi untuk home lab / tanpa IP publik statis)
+### Opsi A — Cloudflare Tunnel via Docker (Rekomendasi)
 
-Tidak perlu buka port di router. Cloudflare Tunnel membuat koneksi outbound dari server ke Cloudflare.
+Cloudflare Tunnel sudah termasuk di `docker-compose.yml` sebagai service `cloudflared`. Tidak perlu install apapun secara terpisah — cukup ambil **Tunnel Token** dari Cloudflare dashboard.
+
+#### 1. Buat Tunnel di Cloudflare Dashboard
+
+1. Buka [one.dash.cloudflare.com](https://one.dash.cloudflare.com)
+2. Masuk ke **Networks → Tunnels → Create a tunnel**
+3. Pilih **Cloudflared** → beri nama (misal: `nova`)
+4. Pilih environment **Docker** → salin **tunnel token** yang muncul (format panjang)
+5. Klik **Next** → setup **Public Hostnames**:
+
+| Subdomain | Domain | Service |
+|---|---|---|
+| `app` | `domain.com` | `http://localhost:3001` |
+| `admin` | `domain.com` | `http://localhost:3002` |
+| `api` | `domain.com` | `http://localhost:3000` |
+
+#### 2. Tambah Token ke .env
+
+Tambahkan di `apps/api/.env` (atau buat file `.env` di root `/opt/nova`):
+
+```env
+CLOUDFLARE_TUNNEL_TOKEN=eyJhIjoiXXXXX...token-panjang-dari-dashboard
+```
+
+#### 3. Jalankan
 
 ```bash
-# Di LXC nova-app — install cloudflared
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | gpg --dearmor -o /usr/share/keyrings/cloudflare-main.gpg
-echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared bookworm main' \
-  | tee /etc/apt/sources.list.d/cloudflared.list
-apt update && apt install -y cloudflared
-
-# Login ke Cloudflare
-cloudflared tunnel login
-
-# Buat tunnel (ganti "nova" dengan nama terserah)
-cloudflared tunnel create nova
-
-# Catat Tunnel ID yang muncul (format UUID)
+docker compose up -d cloudflared
+docker compose logs -f cloudflared
 ```
 
-Buat config file `/etc/cloudflared/config.yml`:
+Status tunnel akan berubah jadi **Healthy** di Cloudflare dashboard dalam beberapa detik.
 
-```yaml
-tunnel: TUNNEL_ID_DARI_PERINTAH_DIATAS
-credentials-file: /root/.cloudflared/TUNNEL_ID_DARI_PERINTAH_DIATAS.json
-
-ingress:
-  - hostname: app.domain.com
-    service: http://localhost:3001
-  - hostname: admin.domain.com
-    service: http://localhost:3002
-  - hostname: api.domain.com
-    service: http://localhost:3000
-    originRequest:
-      noTLSVerify: true
-  - service: http_status:404
-```
-
-> **Catatan WebSocket**: Untuk terminal xterm.js, Cloudflare Tunnel mendukung WebSocket secara otomatis. Pastikan di Cloudflare dashboard → domain → Network → **WebSockets** dalam keadaan **ON**.
-
-Buat DNS record via CLI:
-
-```bash
-cloudflared tunnel route dns nova app.domain.com
-cloudflared tunnel route dns nova admin.domain.com
-cloudflared tunnel route dns nova api.domain.com
-```
-
-Jalankan sebagai service:
-
-```bash
-cloudflared service install
-systemctl enable --now cloudflared
-systemctl status cloudflared
-```
+> **WebSocket**: Untuk terminal xterm.js, aktifkan di Cloudflare dashboard → pilih domain → **Network** → **WebSockets: ON**.
 
 ### Opsi B — Nginx + Certbot (untuk VPS dengan IP publik)
 
