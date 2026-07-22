@@ -20,14 +20,14 @@ FROM base AS prod-install
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
 COPY apps/api/package.json ./package.json
-RUN npm install --omit=dev
+COPY apps/api/prisma ./prisma
+RUN npm install --omit=dev && npx --yes prisma@5.14.0 generate
 
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nestjs
 COPY --from=prod-install --chown=nestjs:nodejs /app/node_modules ./node_modules
-COPY --from=builder --chown=nestjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nestjs:nodejs /app/apps/api/dist ./dist
 COPY --from=builder /app/apps/api/prisma ./prisma
 USER nestjs
