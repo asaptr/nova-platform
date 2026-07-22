@@ -10,6 +10,7 @@ RUN corepack enable && pnpm install --frozen-lockfile --shamefully-hoist
 
 FROM base AS builder
 WORKDIR /app
+ENV CI=true
 RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
