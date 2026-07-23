@@ -248,6 +248,43 @@ export class VmMotdService {
     return { pushed, failed }
   }
 
+  async pushDnsToVm(node: string, vmid: number, primary: string, secondary: string): Promise<void> {
+    // Configure systemd-resolved if present, then write static resolv.conf
+    const script = [
+      `PRIMARY="${primary}"`,
+      `SECONDARY="${secondary}"`,
+      `if systemctl is-active systemd-resolved --quiet 2>/dev/null; then`,
+      `  mkdir -p /etc/systemd/resolved.conf.d`,
+      `  printf "[Resolve]\\nDNS=%s %s\\n" "$PRIMARY" "$SECONDARY" > /etc/systemd/resolved.conf.d/nova.conf`,
+      `  systemctl reload systemd-resolved 2>/dev/null || systemctl restart systemd-resolved 2>/dev/null || true`,
+      `fi`,
+      `[ -L /etc/resolv.conf ] && rm -f /etc/resolv.conf`,
+      `printf "nameserver %s\\nnameserver %s\\n" "$PRIMARY" "$SECONDARY" > /etc/resolv.conf`,
+    ].join('\n')
+    const b64 = Buffer.from(script).toString('base64')
+    await this.proxmox.agentExec(node, vmid, ['bash', '-c', `echo ${b64} | base64 -d | bash`])
+  }
+
+  async pushDnsToAllRunning(primary: string, secondary: string): Promise<{ pushed: number; failed: number }> {
+    const vms = await this.prisma.vm.findMany({
+      where: { status: 'running', proxmoxVmid: { not: null }, proxmoxNode: { not: null } },
+      select: { id: true, displayId: true, proxmoxNode: true, proxmoxVmid: true },
+    })
+    this.logger.log(`Pushing DNS ${primary}/${secondary} to ${vms.length} running VMs`)
+    let pushed = 0, failed = 0
+    for (const vm of vms) {
+      try {
+        await this.pushDnsToVm(vm.proxmoxNode, vm.proxmoxVmid, primary, secondary)
+        this.logger.log(`DNS pushed: ${vm.displayId}`)
+        pushed++
+      } catch (e: any) {
+        this.logger.warn(`DNS push failed for ${vm.displayId}: ${e.message}`)
+        failed++
+      }
+    }
+    return { pushed, failed }
+  }
+
   async fixVgaAllVms(): Promise<void> {
     const vms = await this.prisma.vm.findMany({
       where: {

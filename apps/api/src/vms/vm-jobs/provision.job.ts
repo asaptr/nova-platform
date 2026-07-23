@@ -127,12 +127,13 @@ export class ProvisionJob {
         await this.proxmox.waitForTask(node, upid)
         step('clone task complete')
 
-        step('updateVmConfig hardware (cpu/ram/balloon/autostart)')
+        step('updateVmConfig hardware (cpu/ram/balloon/autostart/agent)')
         await this.proxmox.updateVmConfig(node, vmid, {
           cores: pkg.vcpu,
           memory: Number(pkg.ramMb),
           balloon: 0,
           onboot: 1,
+          agent: 'enabled=1,fstrim_cloned_disks=0',
         })
 
         step('updateVmConfig vga → std')

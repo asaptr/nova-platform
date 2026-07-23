@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import api from '@/lib/api'
-import { Save, AlertTriangle, Eye, EyeOff, Globe, Shield, Server, Zap, ExternalLink, Network, Plus, RefreshCw } from 'lucide-react'
+import { Save, AlertTriangle, Eye, EyeOff, Globe, Shield, Server, Zap, ExternalLink, Network, Plus, RefreshCw, Send } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 
 // ── CIDR helpers ───────────────────────────────────────────────────────────────
@@ -124,6 +124,7 @@ export default function SystemSettingsPage() {
   const [cfg, setCfg] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [savingSection, setSavingSection] = useState<string | null>(null)
+  const [pushingDns, setPushingDns] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('branding')
 
   // Network state
@@ -188,6 +189,21 @@ export default function SystemSettingsPage() {
       toast(e.response?.data?.message ?? 'Gagal menyimpan', 'error')
     } finally {
       setSavingSection(null)
+    }
+  }
+
+  async function pushDns() {
+    const primary = cfg['nat.dns_primary'] ?? ''
+    const secondary = cfg['nat.dns_secondary'] ?? ''
+    if (!primary) { toast('Isi DNS Primary terlebih dahulu', 'warning'); return }
+    setPushingDns(true)
+    try {
+      const { data } = await api.post('/admin/settings/push-dns', { primary, secondary })
+      toast(data.message, 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal push DNS', 'error')
+    } finally {
+      setPushingDns(false)
     }
   }
 
@@ -560,6 +576,21 @@ export default function SystemSettingsPage() {
                 <Input value={val('nat.dns_secondary')} onChange={v => { set('nat.dns_secondary')(v); setDnsPreset('Custom') }} placeholder="1.0.0.1" />
               </Field>
             </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 bg-background border border-border rounded-lg">
+            <div>
+              <p className="text-xs font-medium">Push DNS ke Semua VM</p>
+              <p className="text-xs text-muted mt-0.5">Update /etc/resolv.conf di semua VM yang sedang running via qemu-agent.</p>
+            </div>
+            <button
+              onClick={pushDns}
+              disabled={pushingDns || !cfg['nat.dns_primary']}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-xs text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send size={12} className={pushingDns ? 'animate-pulse' : ''} />
+              {pushingDns ? 'Pushing...' : 'Push DNS'}
+            </button>
           </div>
 
           <div className="flex items-start gap-2 text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2.5">

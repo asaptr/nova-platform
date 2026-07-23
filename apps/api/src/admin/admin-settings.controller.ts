@@ -69,6 +69,13 @@ export class AdminSettingsController {
     return { message: 'Mengirim MOTD & issue banner ke semua VM yang running...' }
   }
 
+  @Post('push-dns')
+  async pushDns(@Body() body: { primary: string; secondary: string }) {
+    if (!body.primary) return { message: 'primary DNS wajib diisi' }
+    const result = await this.vmMotd.pushDnsToAllRunning(body.primary, body.secondary || '')
+    return { message: `DNS pushed ke ${result.pushed} VM${result.failed ? `, gagal ${result.failed}` : ''}`, ...result }
+  }
+
   @Post('fix-vga')
   async fixVga() {
     this.vmMotd.fixVgaAllVms()
