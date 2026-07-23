@@ -172,12 +172,21 @@ model VmTemplate {
   id             String   @id @default(uuid())
   name           String
   description    String?
+  badge          String?
   osFamily       String   @default("linux")
   proxmoxValue   String
   templateType   String   @default("clone")
   isActive       Boolean  @default(true)
   sortOrder      Int      @default(0)
   createdAt      DateTime @default(now())
+}
+
+model RestrictedCommand {
+  id          String   @id @default(uuid())
+  command     String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 }
 
 model TicketMessage {

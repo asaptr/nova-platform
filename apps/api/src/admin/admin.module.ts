@@ -15,6 +15,7 @@ import { AdminProxmoxController } from './admin-proxmox.controller'
 import { AdminSettingsController } from './admin-settings.controller'
 import { AdminNetworkController } from './admin-network.controller'
 import { AdminNotificationsController } from './admin-notifications.controller'
+import { AdminRestrictedCommandsController } from './admin-restricted-commands.controller'
 import { AdminJwtStrategy } from './admin-jwt.strategy'
 import { ProxmoxModule } from '../proxmox/proxmox.module'
 import { MikrotikModule } from '../mikrotik/mikrotik.module'
@@ -50,6 +51,7 @@ import { RolesGuard } from '../common/guards/roles.guard'
     AdminSettingsController,
     AdminNetworkController,
     AdminNotificationsController,
+    AdminRestrictedCommandsController,
   ],
 })
 export class AdminModule {}

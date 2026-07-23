@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Server, Users, Ticket, BarChart3, Settings, LogOut, Shield, HardDrive, Cog } from 'lucide-react'
+import { LayoutDashboard, Server, Users, Ticket, BarChart3, Settings, LogOut, Shield, HardDrive, Cog, ShieldOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEffect, useState } from 'react'
 
@@ -13,6 +13,7 @@ const nav = [
   { href: '/tickets', label: 'Tiket', icon: Ticket },
   { href: '/finance', label: 'Financial', icon: BarChart3, superadminOnly: true },
   { href: '/settings/packages', label: 'Settings', icon: Settings },
+  { href: '/settings/restrictions', label: 'Perintah Terbatas', icon: ShieldOff, superadminOnly: true },
   { href: '/settings/system', label: 'Sistem', icon: Cog, superadminOnly: true },
 ]
 

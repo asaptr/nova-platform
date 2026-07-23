@@ -316,7 +316,7 @@ pveum user add nova@pve --comment "NOVA API User"
 
 # Buat role dengan permission yang dibutuhkan
 pveum role add NOVARole -privs \
-  "VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit \
+  "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit \
    VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network \
    VM.Config.Options VM.Console VM.Migrate VM.PowerMgmt \
    VM.Snapshot VM.Snapshot.Rollback Datastore.AllocateSpace \
@@ -386,6 +386,13 @@ qm set 9000 --serial0 socket --vga std
 qm set 9000 --agent enabled=1
 qm template 9000
 ```
+
+> **Wajib: install qemu-guest-agent di dalam image** — NOVA menggunakan agent untuk set hostname, MOTD, dan restrict commands. Cloud image Debian generic sudah menyertakan agent; distro lain mungkin perlu install manual:
+> ```bash
+> # Jalankan di dalam VM (sebelum dijadikan template):
+> apt install -y qemu-guest-agent
+> systemctl enable --now qemu-guest-agent
+> ```
 
 Gunakan VMID `9000` sebagai template saat buat paket di admin panel.
 
@@ -627,6 +634,24 @@ export LC_ALL=C
 ```
 
 Jalankan perintah `pveum` setelah set env ini.
+
+### OS Templates tidak muncul di admin panel ("Tidak ada VM di Proxmox")
+
+Role `NOVARole` harus memiliki permission `VM.Audit`. Jika role sudah dibuat tanpa `VM.Audit`, tambahkan:
+
+```bash
+export LC_ALL=C
+pveum role modify NOVARole --privs "Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,SDN.Use,Sys.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.Snapshot,VM.Snapshot.Rollback"
+```
+
+### Update schema setelah pull terbaru
+
+Jika ada perubahan database schema (misal field baru), jalankan:
+
+```bash
+docker compose run --rm --entrypoint sh api -c "npx --yes prisma@5.14.0 db push"
+docker compose up -d api
+```
 
 ### VM creation gagal "VM XXXX already exists"
 

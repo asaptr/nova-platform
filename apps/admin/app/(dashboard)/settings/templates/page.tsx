@@ -5,14 +5,16 @@ import api from '@/lib/api'
 import { Plus, Pencil, Trash2, ArrowLeft, RefreshCw } from 'lucide-react'
 
 type Template = {
-  id: string; name: string; description: string | null
+  id: string; name: string; description: string | null; badge: string | null
   osFamily: string; proxmoxValue: string; isActive: boolean; sortOrder: number; templateType: string
 }
 
 type ProxmoxVm = { vmid: string; name: string; status: string; isTemplate: boolean }
 type ProxmoxIso = { volid: string; name: string; storage: string }
 
-const emptyForm = { name: '', description: '', osFamily: 'linux', proxmoxValue: '', sortOrder: 0, templateType: 'clone' }
+const emptyForm = { name: '', description: '', badge: '', osFamily: 'linux', proxmoxValue: '', sortOrder: 0, templateType: 'clone' }
+
+const BADGE_PRESETS = ['Recommended', 'Popular', 'New', 'LTS', 'Beta', 'Sale']
 
 const OS_FAMILIES = ['linux', 'windows', 'freebsd', 'other']
 
@@ -65,6 +67,7 @@ export default function TemplatesPage() {
     setForm({
       name: t.name,
       description: t.description ?? '',
+      badge: t.badge ?? '',
       osFamily: t.osFamily,
       proxmoxValue: t.proxmoxValue,
       sortOrder: t.sortOrder,
@@ -156,6 +159,32 @@ export default function TemplatesPage() {
                 placeholder="LTS, stable"
                 className={inputCls}
               />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted">Badge (opsional)</label>
+              <input
+                type="text"
+                value={form.badge}
+                onChange={e => setForm(f => ({ ...f, badge: e.target.value }))}
+                placeholder="Recommended, New, LTS, ..."
+                className={inputCls}
+              />
+              <div className="flex flex-wrap gap-1 mt-1">
+                {BADGE_PRESETS.map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, badge: f.badge === p ? '' : p }))}
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      form.badge === p
+                        ? 'bg-accent text-white border-accent'
+                        : 'border-border text-muted hover:border-accent/50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted">OS Family</label>
@@ -287,7 +316,14 @@ export default function TemplatesPage() {
               {templates.map(t => (
                 <tr key={t.id} className="hover:bg-background/50">
                   <td className="px-4 py-3">
-                    <p className="font-medium">{t.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-medium">{t.name}</p>
+                      {t.badge && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-accent/10 text-accent border border-accent/20">
+                          {t.badge}
+                        </span>
+                      )}
+                    </div>
                     {t.description && <p className="text-xs text-muted">{t.description}</p>}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted max-w-[160px] truncate">{t.proxmoxValue}</td>

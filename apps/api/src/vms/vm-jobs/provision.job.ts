@@ -236,7 +236,8 @@ export class ProvisionJob {
           await this.vmMotd.writeToVm(node, vmid, brand.name || 'NOVA', panelUrl).catch((e) => {
             this.logger.warn(`[${displayId}] MOTD write failed: ${e.message}`)
           })
-          await this.vmMotd.writeRestrictionsToVm(node, vmid).catch((e) => {
+          const restrictedCmds = await this.vmMotd.getActiveCommands()
+          await this.vmMotd.writeRestrictionsToVm(node, vmid, restrictedCmds).catch((e) => {
             this.logger.warn(`[${displayId}] Restrictions write failed: ${e.message}`)
           })
           const timezone = await this.systemConfig.get('brand.timezone').catch(() => null)

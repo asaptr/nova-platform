@@ -6,7 +6,7 @@ import { formatRupiah } from '@/lib/utils'
 import type { Package } from '@nova/types'
 import { RefreshCw } from 'lucide-react'
 
-type OsTemplate = { id: string; name: string; description: string | null; osFamily: string; proxmoxValue: string }
+type OsTemplate = { id: string; name: string; description: string | null; badge: string | null; osFamily: string; proxmoxValue: string }
 
 function generatePassword() {
   const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -125,10 +125,15 @@ export default function NewVmPage() {
                   key={t.id}
                   type="button"
                   onClick={() => setForm(f => ({ ...f, osTemplate: t.proxmoxValue }))}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
+                  className={`p-3 rounded-lg border text-left transition-colors relative ${
                     form.osTemplate === t.proxmoxValue ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/30'
                   }`}
                 >
+                  {t.badge && (
+                    <span className="absolute top-2 right-2 text-xs px-1.5 py-0.5 rounded-full font-medium bg-accent text-white">
+                      {t.badge}
+                    </span>
+                  )}
                   <p className="font-medium text-sm">{t.name}</p>
                   {t.description && <p className="text-xs text-muted mt-0.5">{t.description}</p>}
                 </button>

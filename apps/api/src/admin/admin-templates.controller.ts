@@ -17,11 +17,12 @@ export class AdminTemplatesController {
 
   @Post()
   @Roles('superadmin')
-  create(@Body() body: { name: string; description?: string; osFamily?: string; proxmoxValue: string; sortOrder?: number }) {
+  create(@Body() body: { name: string; description?: string; badge?: string; osFamily?: string; proxmoxValue: string; sortOrder?: number }) {
     return this.prisma.vmTemplate.create({
       data: {
         name: body.name,
         description: body.description,
+        badge: body.badge || null,
         osFamily: body.osFamily ?? 'linux',
         proxmoxValue: body.proxmoxValue,
         sortOrder: body.sortOrder ?? 0,
@@ -34,9 +35,9 @@ export class AdminTemplatesController {
   @Roles('superadmin')
   update(
     @Param('id') id: string,
-    @Body() body: { name?: string; description?: string; osFamily?: string; proxmoxValue?: string; isActive?: boolean; sortOrder?: number },
+    @Body() body: { name?: string; description?: string; badge?: string; osFamily?: string; proxmoxValue?: string; isActive?: boolean; sortOrder?: number },
   ) {
-    return this.prisma.vmTemplate.update({ where: { id }, data: body })
+    return this.prisma.vmTemplate.update({ where: { id }, data: { ...body, badge: body.badge || null } })
   }
 
   @Delete(':id')

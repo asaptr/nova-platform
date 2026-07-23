@@ -2,8 +2,6 @@ import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { ProxmoxService } from '../proxmox/proxmox.service'
 
-// Script that runs at SSH login — reads /etc/nova/config and renders the banner.
-// ASCII-only: VGA bitmap font in noVNC does not support Unicode box-drawing chars.
 const WELCOME_SCRIPT = `#!/bin/bash
 [ -f /etc/nova/config ] && source /etc/nova/config
 BRAND="\${BRAND:-NOVA}"
@@ -29,58 +27,8 @@ echo "  =================================================="
 echo ""
 `
 
-// Sourced by /etc/profile.d — overrides power commands with shell functions for interactive bash.
-// Covers login shells and most interactive sessions.
-const RESTRICT_PROFILE = `#!/bin/bash
-# Nova VPS - power management must be done through the web panel
-[ -f /etc/nova/config ] && source /etc/nova/config
-PANEL="\${PANEL:-}"
-
-_nova_blocked() {
-  printf "\\n  [NOVA] Perintah '%s' dinonaktifkan dari konsol.\\n" "$1"
-  printf "  Gunakan tombol di web panel untuk mengelola VM.\\n"
-  [ -n "\$PANEL" ] && printf "  Panel  : %s\\n" "\$PANEL"
-  printf "\\n"
-  return 1
-}
-
-shutdown()  { _nova_blocked "shutdown"; }
-reboot()    { _nova_blocked "reboot"; }
-poweroff()  { _nova_blocked "poweroff"; }
-halt()      { _nova_blocked "halt"; }
-
-systemctl() {
-  case "\$1" in
-    poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)
-      _nova_blocked "systemctl \$1"
-      ;;
-    disable|stop|mask)
-      case "\$2" in
-        qemu-guest-agent)
-          printf "\\n  [NOVA] qemu-guest-agent tidak boleh dinonaktifkan.\\n\\n"
-          return 1
-          ;;
-        *)
-          command systemctl "\$@"
-          ;;
-      esac
-      ;;
-    *)
-      command systemctl "\$@"
-      ;;
-  esac
-}
-
-export -f shutdown reboot poweroff halt systemctl 2>/dev/null || true
-
-# Auto-logout idle root sessions — ensures console shows fresh login + banner after inactivity
-TMOUT=900
-readonly TMOUT
-export TMOUT
-`
-
-// Placed in /usr/local/sbin/ (first in root PATH) — catches direct binary calls,
-// non-bash shells, and scripts that bypass shell functions.
+// Generic blocked wrapper — symlinked from each restricted command name.
+// Uses $0 so the error message shows the actual command attempted.
 const NOVA_BLOCKED = `#!/bin/bash
 [ -f /etc/nova/config ] && source /etc/nova/config
 PANEL="\${PANEL:-}"
@@ -92,9 +40,11 @@ printf "\\n"
 exit 1
 `
 
-// Wraps /usr/bin/systemctl — passes through all safe subcommands,
-// blocks power/suspend and protects qemu-guest-agent.
+// Wraps systemctl — blocks power subcommands, protects qemu-guest-agent,
+// passes everything else to the real binary at /usr/bin/.systemctl.nova.
 const SYSTEMCTL_WRAPPER = `#!/bin/bash
+REAL=/usr/bin/.systemctl.nova
+[ -x "\$REAL" ] || REAL=$(command -v systemctl.real 2>/dev/null || echo /lib/systemd/systemd)
 case "\$1" in
   poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)
     [ -f /etc/nova/config ] && source /etc/nova/config
@@ -110,13 +60,62 @@ case "\$1" in
       printf "\\n  [NOVA] qemu-guest-agent tidak boleh dinonaktifkan.\\n\\n"
       exit 1
     fi
-    exec /usr/bin/systemctl "\$@"
+    exec "\$REAL" "\$@"
     ;;
   *)
-    exec /usr/bin/systemctl "\$@"
+    exec "\$REAL" "\$@"
     ;;
 esac
 `
+
+function buildRestrictProfile(commands: string[]): string {
+  const fns = commands.map(cmd => `${cmd}() { _nova_blocked "${cmd}"; }`).join('\n')
+  const exports = [...commands, 'systemctl'].join(' ')
+  return `#!/bin/bash
+[ -f /etc/nova/config ] && source /etc/nova/config
+PANEL="\${PANEL:-}"
+
+_nova_blocked() {
+  printf "\\n  [NOVA] Perintah '%s' dinonaktifkan dari konsol.\\n" "$1"
+  printf "  Gunakan tombol di web panel untuk mengelola VM.\\n"
+  [ -n "\$PANEL" ] && printf "  Panel  : %s\\n" "\$PANEL"
+  printf "\\n"
+  return 1
+}
+
+${fns}
+
+systemctl() {
+  case "$1" in
+    poweroff|reboot|halt|suspend|hibernate|hybrid-sleep|kexec)
+      _nova_blocked "systemctl $1"
+      ;;
+    disable|stop|mask)
+      case "$2" in
+        qemu-guest-agent)
+          printf "\\n  [NOVA] qemu-guest-agent tidak boleh dinonaktifkan.\\n\\n"
+          return 1
+          ;;
+        *)
+          command systemctl "$@"
+          ;;
+      esac
+      ;;
+    *)
+      command systemctl "$@"
+      ;;
+  esac
+}
+
+export -f ${exports} 2>/dev/null || true
+
+TMOUT=900
+readonly TMOUT
+export TMOUT
+`
+}
+
+const DEFAULT_RESTRICTED_COMMANDS = ['shutdown', 'reboot', 'poweroff', 'halt', 'init', 'telinit']
 
 @Injectable()
 export class VmMotdService {
@@ -143,10 +142,6 @@ export class VmMotdService {
     const configB64 = Buffer.from(config).toString('base64')
     const scriptB64 = Buffer.from(WELCOME_SCRIPT).toString('base64')
 
-    // /etc/issue is shown by agetty BEFORE login — visible every time console shows a login prompt.
-    // \e[2J\e[H = clear screen + cursor home (agetty interprets \e as ESC) — hides the
-    // "starting serial terminal on interface serial0" systemd message before banner appears.
-    // \n = hostname, \l = tty name (other agetty escape sequences).
     const issue = [
       '\\e[2J\\e[H',
       '',
@@ -168,41 +163,61 @@ export class VmMotdService {
     await this.proxmox.agentExec(node, vmid, ['bash', '-c', `echo ${issueB64} | base64 -d > /etc/issue`])
   }
 
-  async writeRestrictionsToVm(node: string, vmid: number): Promise<void> {
-    const profileB64 = Buffer.from(RESTRICT_PROFILE).toString('base64')
+  async getActiveCommands(): Promise<string[]> {
+    try {
+      const rows = await this.prisma.restrictedCommand.findMany({
+        where: { isActive: true },
+        select: { command: true },
+      })
+      return rows.length > 0 ? rows.map(r => r.command) : DEFAULT_RESTRICTED_COMMANDS
+    } catch {
+      return DEFAULT_RESTRICTED_COMMANDS
+    }
+  }
+
+  async writeRestrictionsToVm(node: string, vmid: number, commands?: string[]): Promise<void> {
+    const cmds = commands ?? await this.getActiveCommands()
+    const profile = buildRestrictProfile(cmds)
+    const profileB64 = Buffer.from(profile).toString('base64')
     const blockedB64 = Buffer.from(NOVA_BLOCKED).toString('base64')
     const systemctlB64 = Buffer.from(SYSTEMCTL_WRAPPER).toString('base64')
+    const cmdList = cmds.join(' ')
 
-    // Shell function overrides for interactive bash sessions
-    await this.proxmox.agentExec(node, vmid, ['bash', '-c',
-      `echo ${profileB64} | base64 -d > /etc/profile.d/nova-restrict.sh && chmod 644 /etc/profile.d/nova-restrict.sh`])
-
-    // Binary wrapper — /usr/local/sbin/ is first in root PATH on Ubuntu
+    // 1. Write nova-blocked wrapper
     await this.proxmox.agentExec(node, vmid, ['bash', '-c',
       `echo ${blockedB64} | base64 -d > /usr/local/sbin/nova-blocked && chmod 755 /usr/local/sbin/nova-blocked`])
 
-    // Symlink all power commands to the blocked wrapper
+    // 2. Preserve real systemctl binary before overriding (idempotent — skip if already a symlink)
     await this.proxmox.agentExec(node, vmid, ['bash', '-c',
-      'for cmd in shutdown reboot poweroff halt init telinit; do ln -sf /usr/local/sbin/nova-blocked /usr/local/sbin/$cmd; done'])
+      '[ -f /usr/bin/systemctl ] && [ ! -L /usr/bin/systemctl ] && cp /usr/bin/systemctl /usr/bin/.systemctl.nova || true'])
 
-    // systemctl wrapper — passes through safe subcommands, blocks power ops
+    // 3. Write systemctl wrapper (calls .systemctl.nova as real binary)
     await this.proxmox.agentExec(node, vmid, ['bash', '-c',
       `echo ${systemctlB64} | base64 -d > /usr/local/sbin/systemctl && chmod 755 /usr/local/sbin/systemctl`])
+
+    // 4. Symlink systemctl at all standard paths to prevent /usr/bin/systemctl bypass
+    await this.proxmox.agentExec(node, vmid, ['bash', '-c',
+      'for f in /usr/bin/systemctl /bin/systemctl /sbin/systemctl /usr/sbin/systemctl; do d=$(dirname "$f"); [ -d "$d" ] && ln -sf /usr/local/sbin/systemctl "$f" 2>/dev/null || true; done'])
+
+    // 5. Symlink restricted commands in /usr/local/sbin/ (PATH-first override)
+    await this.proxmox.agentExec(node, vmid, ['bash', '-c',
+      `for cmd in ${cmdList}; do ln -sf /usr/local/sbin/nova-blocked /usr/local/sbin/\$cmd; done`])
+
+    // 6. Symlink restricted commands at all standard binary locations (prevent full-path bypass)
+    await this.proxmox.agentExec(node, vmid, ['bash', '-c',
+      `for dir in /sbin /usr/sbin /bin /usr/bin; do for cmd in ${cmdList}; do [ -d "\$dir" ] && ln -sf /usr/local/sbin/nova-blocked "\$dir/\$cmd" 2>/dev/null || true; done; done`])
+
+    // 7. Shell function overrides for interactive bash sessions
+    await this.proxmox.agentExec(node, vmid, ['bash', '-c',
+      `echo ${profileB64} | base64 -d > /etc/profile.d/nova-restrict.sh && chmod 644 /etc/profile.d/nova-restrict.sh`])
   }
 
-  // Fire-and-forget sync to all running VMs — called after brand settings saved
   async syncAllRunning(brandName: string, panelUrl: string): Promise<void> {
     const vms = await this.prisma.vm.findMany({
-      where: {
-        status: 'running',
-        proxmoxVmid: { not: null },
-        proxmoxNode: { not: null },
-      },
+      where: { status: 'running', proxmoxVmid: { not: null }, proxmoxNode: { not: null } },
       select: { id: true, displayId: true, proxmoxNode: true, proxmoxVmid: true },
     })
-
     this.logger.log(`Syncing MOTD to ${vms.length} running VMs (brand="${brandName}")`)
-
     for (const vm of vms) {
       this.writeToVm(vm.proxmoxNode, vm.proxmoxVmid, brandName, panelUrl)
         .then(() => this.logger.log(`MOTD synced: ${vm.displayId}`))
@@ -210,27 +225,29 @@ export class VmMotdService {
     }
   }
 
-  // Push restrictions to all running VMs — call once to deploy to existing VMs
-  async pushRestrictionsToAllRunning(): Promise<void> {
+  async pushRestrictionsToAllRunning(commands?: string[]): Promise<{ pushed: number; failed: number }> {
+    const cmds = commands ?? await this.getActiveCommands()
     const vms = await this.prisma.vm.findMany({
-      where: {
-        status: 'running',
-        proxmoxVmid: { not: null },
-        proxmoxNode: { not: null },
-      },
+      where: { status: 'running', proxmoxVmid: { not: null }, proxmoxNode: { not: null } },
       select: { id: true, displayId: true, proxmoxNode: true, proxmoxVmid: true },
     })
+    this.logger.log(`Pushing restrictions [${cmds.join(',')}] to ${vms.length} running VMs`)
 
-    this.logger.log(`Pushing console restrictions to ${vms.length} running VMs`)
-
+    let pushed = 0
+    let failed = 0
     for (const vm of vms) {
-      this.writeRestrictionsToVm(vm.proxmoxNode, vm.proxmoxVmid)
-        .then(() => this.logger.log(`Restrictions pushed: ${vm.displayId}`))
-        .catch(e => this.logger.warn(`Restrictions push failed for ${vm.displayId}: ${e.message}`))
+      try {
+        await this.writeRestrictionsToVm(vm.proxmoxNode, vm.proxmoxVmid, cmds)
+        this.logger.log(`Restrictions pushed: ${vm.displayId}`)
+        pushed++
+      } catch (e: any) {
+        this.logger.warn(`Restrictions push failed for ${vm.displayId}: ${e.message}`)
+        failed++
+      }
     }
+    return { pushed, failed }
   }
 
-  // Fix vga:std on all VMs — config update takes effect after VM stop+start
   async fixVgaAllVms(): Promise<void> {
     const vms = await this.prisma.vm.findMany({
       where: {
@@ -240,11 +257,8 @@ export class VmMotdService {
       },
       select: { displayId: true, proxmoxNode: true, proxmoxVmid: true },
     })
-
     this.logger.log(`Fixing VGA config for ${vms.length} VMs`)
-
     for (const vm of vms) {
-      // Change vga to std; keep serial0 (needed for xterm terminal)
       this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { vga: 'std' })
         .then(() => this.logger.log(`VGA fixed: ${vm.displayId}`))
         .catch(e => this.logger.warn(`VGA fix failed for ${vm.displayId}: ${e.message}`))
