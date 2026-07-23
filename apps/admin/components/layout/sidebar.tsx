@@ -13,7 +13,6 @@ const nav = [
   { href: '/tickets', label: 'Tiket', icon: Ticket },
   { href: '/finance', label: 'Financial', icon: BarChart3, superadminOnly: true },
   { href: '/settings/packages', label: 'Settings', icon: Settings },
-  { href: '/settings/restrictions', label: 'Perintah Terbatas', icon: ShieldOff, superadminOnly: true },
   { href: '/settings/system', label: 'Sistem', icon: Cog, superadminOnly: true },
 ]
 

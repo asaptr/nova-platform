@@ -6,6 +6,26 @@ import api from '@/lib/api'
 import { formatDate, formatRupiah } from '@/lib/utils'
 import { ArrowLeft } from 'lucide-react'
 
+const ACTION_LABELS: Record<string, { label: string; color: string }> = {
+  'vm.create':          { label: 'Buat VM',           color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
+  'vm.delete':          { label: 'Hapus VM',           color: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
+  'vm.start':           { label: 'Nyalakan VM',        color: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' },
+  'vm.stop':            { label: 'Matikan VM',         color: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300' },
+  'vm.reboot':          { label: 'Restart VM',         color: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300' },
+  'vm.terminal_access': { label: 'Akses Terminal SSH', color: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300' },
+  'vm.console_access':  { label: 'Akses Web Console',  color: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300' },
+  'vm.reset_password':  { label: 'Ganti Password',     color: 'bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300' },
+  'settings.update':    { label: 'Ubah Pengaturan',    color: 'bg-gray-50 text-gray-600 dark:bg-gray-900 dark:text-gray-400' },
+  'user.suspend':       { label: 'Suspend User',       color: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
+  'user.activate':      { label: 'Aktifkan User',      color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
+}
+
+function AuditActionBadge({ action }: { action: string }) {
+  const info = ACTION_LABELS[action]
+  if (info) return <span className={`text-xs px-2 py-0.5 rounded font-medium ${info.color}`}>{info.label}</span>
+  return <span className="text-xs font-mono text-muted">{action}</span>
+}
+
 type Tab = 'overview' | 'vms' | 'transactions' | 'audit'
 
 export default function AdminUserDetailPage() {
@@ -216,7 +236,7 @@ export default function AdminUserDetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                {['Aksi', 'Resource', 'Actor', 'Waktu'].map(h => (
+                {['Aksi', 'VM', 'Actor', 'Waktu'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-medium text-muted uppercase">{h}</th>
                 ))}
               </tr>
@@ -224,9 +244,16 @@ export default function AdminUserDetailPage() {
             <tbody className="divide-y divide-border">
               {(user.auditLogs ?? []).map((log: any) => (
                 <tr key={log.id} className="hover:bg-background/50">
-                  <td className="px-4 py-3 font-mono text-xs">{log.action}</td>
-                  <td className="px-4 py-3 text-xs text-muted">{log.resourceType}:{log.resourceId?.slice(0, 8)}</td>
-                  <td className="px-4 py-3 text-xs">{log.actorType}</td>
+                  <td className="px-4 py-3">
+                    <AuditActionBadge action={log.action} />
+                  </td>
+                  <td className="px-4 py-3 text-xs font-mono text-muted">
+                    {log.metadata?.displayId ?? log.resourceId?.slice(0, 8) ?? '—'}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    <span className="font-medium">{user.fullName ?? user.email}</span>
+                    <span className="text-muted ml-1 text-[10px]">({log.actorType})</span>
+                  </td>
                   <td className="px-4 py-3 text-muted text-xs">{formatDate(log.createdAt)}</td>
                 </tr>
               ))}

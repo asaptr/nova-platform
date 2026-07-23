@@ -228,7 +228,7 @@ export class VmsService {
       await this.prisma.vm.update({ where: { id: vmId }, data: { status: 'running' } })
     }, () => this.prisma.vm.update({ where: { id: vmId }, data: { status: 'stopped' } }).then(() => {}))
 
-    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.start', resourceType: 'vm', resourceId: vmId })
+    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.start', resourceType: 'vm', resourceId: vmId, metadata: { displayId: vm.displayId } })
     return { message: 'VM sedang dinyalakan...' }
   }
 
@@ -251,7 +251,7 @@ export class VmsService {
       await this.prisma.vm.update({ where: { id: vmId }, data: { status: 'stopped' } })
     })
 
-    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.stop', resourceType: 'vm', resourceId: vmId })
+    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.stop', resourceType: 'vm', resourceId: vmId, metadata: { displayId: vm.displayId } })
     return { message: 'VM sedang dimatikan...' }
   }
 
@@ -270,20 +270,20 @@ export class VmsService {
       await this.prisma.vm.update({ where: { id: vmId }, data: { status: 'running' } })
     }, () => this.prisma.vm.update({ where: { id: vmId }, data: { status: 'running' } }).then(() => {}))
 
-    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.reboot', resourceType: 'vm', resourceId: vmId })
+    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.reboot', resourceType: 'vm', resourceId: vmId, metadata: { displayId: vm.displayId } })
     return { message: 'VM sedang di-reboot...' }
   }
 
   async getConsole(vmId: string, userId: string) {
     const vm = await this.findUserVm(vmId, userId)
     const ticket = await this.proxmox.createVncTicket(vm.proxmoxNode, vm.proxmoxVmid)
-    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.console_access', resourceType: 'vm', resourceId: vmId })
+    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.console_access', resourceType: 'vm', resourceId: vmId, metadata: { displayId: vm.displayId } })
     return { ...ticket, node: vm.proxmoxNode, vmid: vm.proxmoxVmid }
   }
 
   async getTerminal(vmId: string, userId: string) {
-    await this.findUserVm(vmId, userId)
-    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.terminal_access', resourceType: 'vm', resourceId: vmId })
+    const vm = await this.findUserVm(vmId, userId)
+    await this.audit.log({ actorType: 'user', actorId: userId, action: 'vm.terminal_access', resourceType: 'vm', resourceId: vmId, metadata: { displayId: vm.displayId } })
     return { ok: true }
   }
 

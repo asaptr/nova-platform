@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import api from '@/lib/api'
-import { Save, AlertTriangle, Eye, EyeOff, Globe, Shield, Server, Zap, ExternalLink, Network, Plus, RefreshCw, Send } from 'lucide-react'
+import { Save, AlertTriangle, Eye, EyeOff, Globe, Shield, Server, Zap, ExternalLink, Network, Plus, RefreshCw, Send, ShieldOff, Trash2 } from 'lucide-react'
 import { useToast } from '@/components/ui/toast'
 
 // ── CIDR helpers ───────────────────────────────────────────────────────────────
@@ -47,13 +47,14 @@ const DNS_PRESETS = [
 const MASK = '••••••••'
 const SUBDOMAINS = ['app', 'admin', 'api', 'status', 'docs', 'changelog']
 
-type Tab = 'branding' | 'domain' | 'infra' | 'network'
+type Tab = 'branding' | 'domain' | 'infra' | 'network' | 'blocked'
 
 const TABS: { id: Tab; label: string; icon: any }[] = [
-  { id: 'branding', label: 'Branding', icon: Zap },
-  { id: 'domain',   label: 'Domain',   icon: Globe },
-  { id: 'infra',    label: 'Infrastruktur', icon: Server },
-  { id: 'network',  label: 'Network & NAT', icon: Network },
+  { id: 'branding', label: 'Branding',          icon: Zap },
+  { id: 'domain',   label: 'Domain',             icon: Globe },
+  { id: 'infra',    label: 'Infrastruktur',      icon: Server },
+  { id: 'network',  label: 'Network & NAT',      icon: Network },
+  { id: 'blocked',  label: 'Blocked Commands',   icon: ShieldOff },
 ]
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -160,6 +161,15 @@ export default function SystemSettingsPage() {
   const [fixingAgent, setFixingAgent] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('branding')
 
+  // Blocked commands state
+  type Cmd = { id: string; command: string; description: string | null; isActive: boolean }
+  const [cmds, setCmds] = useState<Cmd[]>([])
+  const [cmdsLoading, setCmdsLoading] = useState(false)
+  const [pushingRestrictions, setPushingRestrictions] = useState(false)
+  const [newCmd, setNewCmd] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [showCmdForm, setShowCmdForm] = useState(false)
+
   // Network state
   const [bridges, setBridges] = useState<any[]>([])
   const [bridgesLoading, setBridgesLoading] = useState(false)
@@ -188,6 +198,10 @@ export default function SystemSettingsPage() {
     }).catch(() => setLoading(false))
     fetchBridges()
   }, [fetchBridges])
+
+  useEffect(() => {
+    if (activeTab === 'blocked' && cmds.length === 0) loadCmds()
+  }, [activeTab])
 
   function val(key: string) { return cfg[key] ?? '' }
   function set(key: string) { return (v: string) => setCfg(prev => ({ ...prev, [key]: v })) }
@@ -262,6 +276,46 @@ export default function SystemSettingsPage() {
     } finally {
       setPushingDns(false)
     }
+  }
+
+  async function loadCmds() {
+    setCmdsLoading(true)
+    try {
+      const { data } = await api.get('/admin/restricted-commands')
+      setCmds(data)
+    } finally { setCmdsLoading(false) }
+  }
+
+  async function addCmd() {
+    if (!newCmd.trim()) return
+    try {
+      await api.post('/admin/restricted-commands', { command: newCmd.trim(), description: newDesc.trim() || undefined })
+      setNewCmd(''); setNewDesc(''); setShowCmdForm(false)
+      toast('Perintah ditambahkan', 'success')
+      loadCmds()
+    } catch (e: any) { toast(e.response?.data?.message ?? 'Gagal menambah', 'error') }
+  }
+
+  async function toggleCmd(c: Cmd) {
+    await api.patch(`/admin/restricted-commands/${c.id}`, { isActive: !c.isActive })
+    toast(c.isActive ? `${c.command} dinonaktifkan` : `${c.command} diaktifkan`, 'success')
+    loadCmds()
+  }
+
+  async function removeCmd(c: Cmd) {
+    if (!confirm(`Hapus "${c.command}"?`)) return
+    await api.delete(`/admin/restricted-commands/${c.id}`)
+    toast(`${c.command} dihapus`, 'success')
+    loadCmds()
+  }
+
+  async function pushRestrictions() {
+    setPushingRestrictions(true)
+    try {
+      const { data } = await api.post('/admin/restricted-commands/push-all')
+      toast(data.message, 'success')
+    } catch (e: any) { toast(e.response?.data?.message ?? 'Gagal push', 'error') }
+    finally { setPushingRestrictions(false) }
   }
 
   async function createBridge() {
@@ -703,6 +757,123 @@ export default function SystemSettingsPage() {
           </div>
 
           <SaveBar onSave={() => save('network', ['nat.network', 'nat.bridge', 'nat.gateway', 'nat.public_ip', 'nat.dns_primary', 'nat.dns_secondary', 'public.bridge'])} saving={savingSection === 'network'} />
+        </div>
+      )}
+
+      {/* Tab: Blocked Commands */}
+      {activeTab === 'blocked' && (
+        <div className="space-y-4">
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm text-amber-800 dark:text-amber-300">
+            <p className="font-medium">Cara kerja</p>
+            <p className="mt-1 text-amber-700 dark:text-amber-400 text-xs">
+              Perintah aktif diblokir via shell function override + symlink wrapper di seluruh binary path VM.
+              Setelah mengubah daftar, klik <strong>Push ke Semua VM</strong>. VM baru otomatis mendapat daftar terbaru saat provisioning.
+            </p>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldOff size={15} className="text-accent" />
+                <h2 className="font-semibold text-sm">Daftar Blocked Commands</h2>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={pushRestrictions}
+                  disabled={pushingRestrictions}
+                  className="flex items-center gap-1.5 border border-border px-3 py-1.5 rounded-lg text-xs text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50"
+                >
+                  <Send size={12} className={pushingRestrictions ? 'animate-pulse' : ''} />
+                  {pushingRestrictions ? 'Pushing...' : 'Push ke Semua VM'}
+                </button>
+                <button
+                  onClick={() => setShowCmdForm(v => !v)}
+                  className="flex items-center gap-1.5 bg-accent text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                >
+                  <Plus size={12} /> Tambah
+                </button>
+              </div>
+            </div>
+
+            {showCmdForm && (
+              <div className="border border-border rounded-lg p-3 space-y-3 bg-background">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted">Nama Perintah</label>
+                    <input
+                      value={newCmd}
+                      onChange={e => setNewCmd(e.target.value)}
+                      placeholder="contoh: dd, mkfs"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted">Deskripsi (opsional)</label>
+                    <input
+                      value={newDesc}
+                      onChange={e => setNewDesc(e.target.value)}
+                      placeholder="Keterangan singkat"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowCmdForm(false)} className="px-3 py-1.5 border border-border rounded-lg text-xs">Batal</button>
+                  <button
+                    onClick={addCmd}
+                    disabled={!newCmd.trim()}
+                    className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 hover:opacity-90"
+                  >
+                    Tambah
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="border border-border rounded-lg overflow-hidden">
+              {cmdsLoading ? (
+                <div className="p-6 text-center text-sm text-muted">Memuat...</div>
+              ) : cmds.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted">Belum ada blocked commands.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-background">
+                      {['Perintah', 'Deskripsi', 'Aktif', ''].map(h => (
+                        <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-muted uppercase">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {cmds.map(c => (
+                      <tr key={c.id} className="hover:bg-background/50">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <ShieldOff size={12} className={c.isActive ? 'text-red-500' : 'text-muted'} />
+                            <span className="font-mono font-medium text-xs">{c.command}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted">{c.description ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => toggleCmd(c)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${c.isActive ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          >
+                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${c.isActive ? 'translate-x-4' : 'translate-x-1'}`} />
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => removeCmd(c)} className="p-1 text-muted hover:text-red-500 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -54,7 +54,7 @@ export class AdminUsersController {
       }),
       this.prisma.vm.findMany({ where: { userId: id }, include: { package: true }, orderBy: { createdAt: 'desc' } }),
       this.prisma.transaction.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' }, take: 20 }),
-      this.prisma.auditLog.findMany({ where: { actorId: id, actorType: 'user' }, orderBy: { createdAt: 'desc' }, take: 30 }),
+      this.prisma.auditLog.findMany({ where: { actorId: id, actorType: 'user' }, orderBy: { createdAt: 'desc' }, take: 50 }),
     ])
     return { user, vms, transactions, auditLogs }
   }
