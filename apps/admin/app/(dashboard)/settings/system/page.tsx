@@ -125,6 +125,7 @@ export default function SystemSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [savingSection, setSavingSection] = useState<string | null>(null)
   const [pushingDns, setPushingDns] = useState(false)
+  const [pushingMotd, setPushingMotd] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('branding')
 
   // Network state
@@ -189,6 +190,18 @@ export default function SystemSettingsPage() {
       toast(e.response?.data?.message ?? 'Gagal menyimpan', 'error')
     } finally {
       setSavingSection(null)
+    }
+  }
+
+  async function pushMotd() {
+    setPushingMotd(true)
+    try {
+      const { data } = await api.post('/admin/settings/sync-motd')
+      toast(data.message, 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal push MOTD', 'error')
+    } finally {
+      setPushingMotd(false)
     }
   }
 
@@ -314,6 +327,21 @@ export default function SystemSettingsPage() {
               <option value="UTC">UTC — GMT+0</option>
             </select>
           </Field>
+
+          <div className="flex items-center justify-between gap-3 p-3 bg-background border border-border rounded-lg">
+            <div>
+              <p className="text-xs font-medium">Push Banner ke Semua VM</p>
+              <p className="text-xs text-muted mt-0.5">Kirim MOTD & banner login ke semua VM yang sedang running via qemu-agent.</p>
+            </div>
+            <button
+              onClick={pushMotd}
+              disabled={pushingMotd}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-xs text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send size={12} className={pushingMotd ? 'animate-pulse' : ''} />
+              {pushingMotd ? 'Pushing...' : 'Push MOTD'}
+            </button>
+          </div>
 
           <SaveBar onSave={() => save('brand', ['brand.name', 'brand.tagline', 'brand.logo_url', 'brand.timezone'])} saving={savingSection === 'brand'} />
         </div>

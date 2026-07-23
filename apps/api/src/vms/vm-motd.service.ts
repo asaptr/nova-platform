@@ -249,16 +249,16 @@ export class VmMotdService {
   }
 
   async pushDnsToVm(node: string, vmid: number, primary: string, secondary: string): Promise<void> {
-    // Configure systemd-resolved if present, then write static resolv.conf
+    // Disable systemd-resolved stub so resolv.conf uses real IPs, not 127.0.0.53
     const script = [
       `PRIMARY="${primary}"`,
       `SECONDARY="${secondary}"`,
       `if systemctl is-active systemd-resolved --quiet 2>/dev/null; then`,
       `  mkdir -p /etc/systemd/resolved.conf.d`,
-      `  printf "[Resolve]\\nDNS=%s %s\\n" "$PRIMARY" "$SECONDARY" > /etc/systemd/resolved.conf.d/nova.conf`,
-      `  systemctl reload systemd-resolved 2>/dev/null || systemctl restart systemd-resolved 2>/dev/null || true`,
+      `  printf "[Resolve]\\nDNS=%s %s\\nFallbackDNS=\\nDNSStubListener=no\\n" "$PRIMARY" "$SECONDARY" > /etc/systemd/resolved.conf.d/nova.conf`,
+      `  systemctl restart systemd-resolved 2>/dev/null || true`,
       `fi`,
-      `[ -L /etc/resolv.conf ] && rm -f /etc/resolv.conf`,
+      `rm -f /etc/resolv.conf`,
       `printf "nameserver %s\\nnameserver %s\\n" "$PRIMARY" "$SECONDARY" > /etc/resolv.conf`,
     ].join('\n')
     const b64 = Buffer.from(script).toString('base64')
