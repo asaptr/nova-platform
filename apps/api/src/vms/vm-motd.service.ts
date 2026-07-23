@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { ProxmoxService } from '../proxmox/proxmox.service'
+import { SystemConfigService } from '../system-config/system-config.service'
 
 const WELCOME_SCRIPT = `#!/bin/bash
 [ -f /etc/nova/config ] && source /etc/nova/config
 BRAND="\${BRAND:-NOVA}"
+HEADLINE="\${HEADLINE:-}"
 PANEL="\${PANEL:-}"
 HOST=$(hostname 2>/dev/null)
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -15,6 +17,7 @@ UPTIME=$(uptime -p 2>/dev/null | sed "s/^up //")
 echo ""
 echo "  =================================================="
 printf "   %s\\n" "$BRAND"
+[ -n "\$HEADLINE" ] && printf "   %s\\n" "\$HEADLINE"
 echo "  --------------------------------------------------"
 printf "   Host   : %s\\n" "$HOST"
 printf "   IP     : %s\\n" "$IP"
@@ -124,10 +127,11 @@ export class VmMotdService {
   constructor(
     private prisma: PrismaService,
     private proxmox: ProxmoxService,
+    private systemConfig: SystemConfigService,
   ) {}
 
-  buildConfig(brandName: string, panelUrl: string): string {
-    return `BRAND=${JSON.stringify(brandName || 'NOVA')}\nPANEL=${JSON.stringify(panelUrl || '')}\n`
+  buildConfig(brandName: string, panelUrl: string, headline?: string): string {
+    return `BRAND=${JSON.stringify(brandName || 'NOVA')}\nPANEL=${JSON.stringify(panelUrl || '')}\nHEADLINE=${JSON.stringify(headline || '')}\n`
   }
 
   async syncTimezoneToVm(node: string, vmid: number, timezone: string): Promise<void> {
@@ -138,7 +142,8 @@ export class VmMotdService {
 
   async writeToVm(node: string, vmid: number, brandName: string, panelUrl: string): Promise<void> {
     const brand = brandName || 'NOVA'
-    const config = this.buildConfig(brand, panelUrl)
+    const headline = await this.systemConfig.get('motd.headline').catch(() => '') ?? ''
+    const config = this.buildConfig(brand, panelUrl, headline)
     const configB64 = Buffer.from(config).toString('base64')
     const scriptB64 = Buffer.from(WELCOME_SCRIPT).toString('base64')
 

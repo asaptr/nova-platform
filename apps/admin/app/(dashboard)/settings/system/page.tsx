@@ -118,6 +118,37 @@ function SaveBar({ onSave, saving }: { onSave: () => void; saving: boolean }) {
   )
 }
 
+// ── MOTD Preview ───────────────────────────────────────────────────────────────
+function MotdPreview({ brand, panelUrl, headline }: { brand: string; panelUrl: string; headline: string }) {
+  const lines = [
+    '  ==================================================',
+    `   ${brand}`,
+    headline ? `   ${headline}` : null,
+    '  --------------------------------------------------',
+    '   Host   : vm-xxxxxxxx',
+    '   IP     : 10.20.0.x',
+    '   CPU    : 1 vCPU',
+    '   Memory : 256M / 512M',
+    '   Disk   : 3.2G / 10G',
+    '   Uptime : 2 minutes',
+    panelUrl ? '  --------------------------------------------------' : null,
+    panelUrl ? `   Panel  : ${panelUrl}` : null,
+    '  ==================================================',
+  ].filter(Boolean) as string[]
+
+  return (
+    <div className="bg-[#0d1117] rounded-lg p-4 font-mono text-xs leading-relaxed overflow-x-auto">
+      <p className="text-[#8b949e] mb-1">root@vm-xxxxxxxx:~# <span className="text-[#cdd9e5]">ssh login</span></p>
+      <p className="text-[#cdd9e5] mb-1"></p>
+      {lines.map((line, i) => (
+        <p key={i} className="text-[#7ee787] whitespace-pre">{line}</p>
+      ))}
+      <p className="text-[#cdd9e5] mt-1"></p>
+      <p className="text-[#8b949e]">root@vm-xxxxxxxx:~# <span className="animate-pulse">_</span></p>
+    </div>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function SystemSettingsPage() {
   const { toast } = useToast()
@@ -341,10 +372,20 @@ export default function SystemSettingsPage() {
             </select>
           </Field>
 
+          <Field label="Headline MOTD (opsional)" note="Teks tambahan yang muncul di bawah nama brand pada banner SSH VM. Kosongkan untuk tidak menampilkan.">
+            <Input value={val('motd.headline')} onChange={set('motd.headline')} placeholder="Managed VPS Platform — support@domain.com" />
+          </Field>
+
+          {/* MOTD Preview */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted">Preview Banner SSH</p>
+            <MotdPreview brand={val('brand.name') || 'NOVA'} panelUrl={val('domain.base') ? `https://app.${val('domain.base').replace(/^https?:\/\//,'')}` : ''} headline={val('motd.headline')} />
+          </div>
+
           <div className="flex items-center justify-between gap-3 p-3 bg-background border border-border rounded-lg">
             <div>
               <p className="text-xs font-medium">Push Banner ke Semua VM</p>
-              <p className="text-xs text-muted mt-0.5">Kirim MOTD & banner login ke semua VM yang sedang running via qemu-agent.</p>
+              <p className="text-xs text-muted mt-0.5">Kirim MOTD & banner login ke semua VM running via qemu-agent. VM baru otomatis menerima banner saat provisioning.</p>
             </div>
             <button
               onClick={pushMotd}
@@ -356,7 +397,7 @@ export default function SystemSettingsPage() {
             </button>
           </div>
 
-          <SaveBar onSave={() => save('brand', ['brand.name', 'brand.tagline', 'brand.logo_url', 'brand.timezone'])} saving={savingSection === 'brand'} />
+          <SaveBar onSave={() => save('brand', ['brand.name', 'brand.tagline', 'brand.logo_url', 'brand.timezone', 'motd.headline'])} saving={savingSection === 'brand'} />
         </div>
       )}
 

@@ -10,6 +10,7 @@ RUN corepack enable && pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /app
+COPY --from=deps /root/.cache/node/corepack /root/.cache/node/corepack
 RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
