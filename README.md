@@ -580,10 +580,20 @@ docker compose run --rm -v /tmp/seed.js:/seed.js --entrypoint node api /seed.js
 
 ### Login admin gagal "Login gagal"
 
-Pastikan `FRONTEND_URL` dan `ADMIN_URL` sudah diisi di `apps/api/.env` sesuai subdomain Cloudflare. Kedua env ini mengontrol CORS — tanpanya, browser memblokir request ke API. Setelah diisi:
+Pastikan `FRONTEND_URL` dan `ADMIN_URL` sudah diisi di `apps/api/.env` sesuai subdomain Cloudflare **dengan `https://`** (bukan `http://`). Cloudflare selalu deliver HTTPS ke browser — kalau .env pakai `http://`, origin tidak cocok dan CORS block.
+
+Setelah diisi, gunakan `up -d` bukan `restart` supaya env baru ter-load:
 
 ```bash
-docker compose restart api
+docker compose up -d api
+```
+
+> **Penting**: `docker compose restart` tidak reload env_file. Gunakan `docker compose up -d` untuk recreate container dengan env terbaru.
+
+**Jika ada error parse .env** (`unexpected character`): karakter `<`, `>` di `EMAIL_FROM` dan quotes di `SMTP_PASS` menyebabkan error. Gunakan format tanpa outer quotes:
+```env
+EMAIL_FROM=NOVA noreply@domain.com
+SMTP_PASS=
 ```
 
 ### API container Restarting terus
