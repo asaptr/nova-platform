@@ -5,9 +5,29 @@ import { VmStatusBadge } from './vm-status-badge'
 import { Server, Copy, Monitor, AlertTriangle } from 'lucide-react'
 import { formatDate, formatOsName } from '@/lib/utils'
 
+function ProvisionProgress({ vm }: { vm: Vm }) {
+  const pct = vm.provisionProgress ?? 0
+  const label = vm.provisionStep ?? (vm.status === 'pending' ? 'Menunggu antrian...' : 'Memulai provisioning...')
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-muted truncate">{label}</span>
+        <span className="font-medium text-accent ml-2 flex-shrink-0">{pct}%</span>
+      </div>
+      <div className="h-1.5 bg-border rounded-full overflow-hidden">
+        <div
+          className="h-full bg-accent rounded-full transition-all duration-700"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 export function VmCard({ vm }: { vm: Vm }) {
   const isNat = vm.ipType === 'nat'
   const sshCmd = `ssh root@${vm.ipAddress}`
+  const isProvisioning = vm.status === 'pending' || vm.status === 'provisioning'
 
   function copy() {
     navigator.clipboard.writeText(sshCmd)
@@ -48,6 +68,8 @@ export function VmCard({ vm }: { vm: Vm }) {
           <p className="font-medium">{formatDate(vm.createdAt)}</p>
         </div>
       </div>
+
+      {isProvisioning && <ProvisionProgress vm={vm} />}
 
       {vm.status === 'suspended' && (
         <div className="flex items-start gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">

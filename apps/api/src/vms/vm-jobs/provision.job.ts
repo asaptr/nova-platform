@@ -52,14 +52,41 @@ export class ProvisionJob {
       || this.config.get('PROXMOX_NODE')
     this.logger.log(`Provisioning VM ${displayId} (${vmId}) mode=${templateType ?? 'clone'}`)
 
-    const step = (s: string) => this.logger.log(`[${displayId}] STEP: ${s}`)
+    const STEPS: [string, number][] = [
+      ['Memulai provisioning', 5],
+      ['Memuat konfigurasi paket', 10],
+      ['Mengalokasikan VMID', 15],
+      ['Mengkonfigurasi jaringan', 20],
+      ['Memulai clone VM', 30],
+      ['Proses clone selesai', 50],
+      ['Mengatur CPU & RAM', 55],
+      ['Mengatur display', 58],
+      ['Mengatur cloud-init', 65],
+      ['Resize disk', 70],
+      ['Mengatur port forwarding', 80],
+      ['Menghidupkan VM', 85],
+      ['Menyimpan data VM', 90],
+      ['Mengatur MOTD & keamanan', 95],
+      ['Selesai', 100],
+    ]
+    let stepIdx = 0
+    const step = async (s: string, progressOverride?: number) => {
+      this.logger.log(`[${displayId}] STEP: ${s}`)
+      const entry = STEPS[stepIdx] ?? STEPS[STEPS.length - 1]
+      const progress = progressOverride ?? entry[1]
+      stepIdx++
+      await this.prisma.vm.update({
+        where: { id: vmId },
+        data: { provisionProgress: progress, provisionStep: entry[0] },
+      }).catch(() => {})
+    }
 
     try {
-      step('start — marking provisioning')
+      await step('start — marking provisioning')
       await this.prisma.vm.update({ where: { id: vmId }, data: { status: 'provisioning' } })
 
       const pkg = await this.prisma.package.findUnique({ where: { id: packageId } })
-      step(`pkg loaded: vcpu=${pkg.vcpu} ram=${pkg.ramMb} disk=${pkg.diskGb}`)
+      await step(`pkg loaded: vcpu=${pkg.vcpu} ram=${pkg.ramMb} disk=${pkg.diskGb}`)
 
       // Cross-check PVE nextid with DB to handle permission gaps or race conditions
       const pveNextVmid = await this.proxmox.getNextVmid()
@@ -69,7 +96,7 @@ export class ProvisionJob {
         select: { proxmoxVmid: true },
       })
       const vmid = Math.max(pveNextVmid, (lastVm?.proxmoxVmid ?? 9999) + 1)
-      step(`next vmid: ${vmid} (pve=${pveNextVmid} dbMax=${lastVm?.proxmoxVmid ?? 'none'})`)
+      await step(`next vmid: ${vmid} (pve=${pveNextVmid} dbMax=${lastVm?.proxmoxVmid ?? 'none'})`)
 
       // Read NAT / network config from DB, fall back to env vars
       const [dbNatBridge, dbPublicBridge, dbNatNetwork, dbDnsPrimary, dbDnsSecondary] = await Promise.all([
@@ -87,7 +114,7 @@ export class ProvisionJob {
       const dnsSecondary = dbDnsSecondary || '8.8.8.8'
 
       const bridge = ipType === 'nat' ? natBridge : publicBridge
-      step(`bridge: ${bridge}`)
+      await step(`bridge: ${bridge}`)
 
       let ip: string | undefined
       let sshPort: number | undefined
@@ -104,7 +131,6 @@ export class ProvisionJob {
           || gateway
 
         ipconfig = `ip=${ip}/${prefix},gw=${natGateway}`
-        step(`nat ip: ${ip} sshPort: ${sshPort}`)
         // Reserve IP in DB immediately so concurrent jobs don't get the same slot
         await this.prisma.vm.update({
           where: { id: vmId },
@@ -114,20 +140,18 @@ export class ProvisionJob {
 
       // Auto-detect mode: if osTemplate is a number → clone, otherwise → iso
       const mode: string = templateType ?? (Number.isFinite(Number(osTemplate)) ? 'clone' : 'iso')
-      step(`mode: ${mode}, osTemplate: ${osTemplate}`)
 
       if (mode === 'clone') {
         const templateVmid = Number(osTemplate)
         if (!Number.isFinite(templateVmid)) throw new Error(`Template VMID tidak valid: ${osTemplate}`)
 
         const cloneStorage = this.config.get('CLONE_STORAGE') || undefined
-        step(`cloning from VMID ${templateVmid} → new VMID ${vmid} (storage: ${cloneStorage ?? 'auto'})`)
+        await step(`cloning from VMID ${templateVmid} → new VMID ${vmid}`)
         const upid = await this.proxmox.cloneVm(node, templateVmid, vmid, displayId, cloneStorage)
-        step(`clone task started: ${upid}`)
         await this.proxmox.waitForTask(node, upid)
-        step('clone task complete')
+        await step('clone task complete')
 
-        step('updateVmConfig hardware (cpu/ram/balloon/autostart/agent)')
+        await step('updateVmConfig hardware (cpu/ram/balloon/autostart/agent)')
         await this.proxmox.updateVmConfig(node, vmid, {
           cores: pkg.vcpu,
           memory: Number(pkg.ramMb),
@@ -136,14 +160,12 @@ export class ProvisionJob {
           agent: 'enabled=1,fstrim_cloned_disks=0',
         })
 
-        step('updateVmConfig vga → std')
         await this.proxmox.updateVmConfig(node, vmid, { vga: 'std' })
           .catch((e) => {
             const msg = e.response?.data?.message ?? e.response?.data?.errors ?? e.message
             this.logger.warn(`[${displayId}] vga config FAILED (check VM.Config.HWType permission on Proxmox token): ${msg}`)
           })
 
-        step('updateVmConfig serial0 → socket')
         await this.proxmox.updateVmConfig(node, vmid, { serial0: 'socket' })
           .catch(() => {})
 
@@ -156,22 +178,22 @@ export class ProvisionJob {
         if (ipconfig) configUpdate.ipconfig0 = ipconfig
         configUpdate.nameserver = [dnsPrimary, dnsSecondary].filter(Boolean).join(' ')
         if (bridge) configUpdate.net0 = `virtio,bridge=${bridge}`
-        step(`updateVmConfig cloud-init: ipconfig=${ipconfig ?? 'none'} net0=${bridge ?? 'skip'}`)
+        await step(`updateVmConfig cloud-init: ipconfig=${ipconfig ?? 'none'} net0=${bridge ?? 'skip'}`)
         await this.proxmox.updateVmConfig(node, vmid, configUpdate)
 
-        step('resizeDisk')
+        await step('resizeDisk')
         try {
           const vmCfgForDisk = await this.proxmox.getVmConfig(node, vmid)
           const bootDisk = vmCfgForDisk.bootdisk
             ?? (['scsi0', 'virtio0', 'sata0', 'ide0'] as const).find(k => vmCfgForDisk[k])
             ?? 'scsi0'
-          step(`resizeDisk: ${bootDisk} → ${pkg.diskGb}G`)
+          this.logger.log(`[${displayId}] resizeDisk: ${bootDisk} → ${pkg.diskGb}G`)
           await this.proxmox.resizeDisk(node, vmid, Number(pkg.diskGb), bootDisk)
         } catch (e: any) {
           this.logger.warn(`[${displayId}] Disk resize failed: ${e.response?.data?.errors ?? e.message}`)
         }
       } else {
-        step('createVmRaw (ISO mode)')
+        await step('createVmRaw (ISO mode)')
         const body: Record<string, any> = {
           vmid,
           name: displayId,
@@ -191,16 +213,15 @@ export class ProvisionJob {
       }
 
       if (ipType === 'nat') {
-        step('reading vm config for MAC')
+        await step('Mengatur port forwarding NAT')
         const vmConfig = await this.proxmox.getVmConfig(node, vmid)
         const netStr = vmConfig.net0 ?? ''
         const macMatch = netStr.match(/([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})/)
         const mac = macMatch ? macMatch[1] : ''
-        step(`mac: ${mac}`)
+        this.logger.log(`[${displayId}] mac: ${mac}`)
         if (mac) await this.dnsmasq.addReservation(mac, ip, displayId).catch((e) => {
           this.logger.warn(`[${displayId}] dnsmasq skipped: ${e.message}`)
         })
-        step('mikrotik addSshForward')
         await this.mikrotik.addSshForward(ip, sshPort, displayId).catch((e) => {
           this.logger.warn(`[${displayId}] MikroTik NAT forward gagal (bisa setup manual): ${e.message}`)
         })
@@ -209,10 +230,10 @@ export class ProvisionJob {
         })
       }
 
-      step('startVm')
+      await step('startVm')
       await this.proxmox.startVm(node, vmid)
 
-      step('saving vmid and IP to DB')
+      await step('saving vmid and IP to DB')
       await this.prisma.vm.update({
         where: { id: vmId },
         data: {
@@ -224,9 +245,9 @@ export class ProvisionJob {
       })
 
       if (mode === 'clone') {
-        step('waitForAgent (120s) — optional, password already set via cloud-init')
+        await step('waitForAgent (120s) — optional, password already set via cloud-init')
         await this.proxmox.waitForAgent(node, vmid, 120_000).then(async () => {
-          step('agent ready — setHostname + MOTD via agent')
+          await step('agent ready — setHostname + MOTD via agent')
           await this.proxmox.setHostname(node, vmid, hostname).catch((e) => {
             this.logger.warn(`[${displayId}] setHostname via agent failed: ${e.message}`)
           })
@@ -250,10 +271,10 @@ export class ProvisionJob {
         })
       }
 
-      step('updating VM record to running')
+      await step('updating VM record to running')
       await this.prisma.vm.update({
         where: { id: vmId },
-        data: { status: mode === 'clone' ? 'running' : 'provisioning' },
+        data: { status: mode === 'clone' ? 'running' : 'provisioning', provisionProgress: 100 },
       })
 
       const user = await this.prisma.user.findUnique({ where: { id: userId } })

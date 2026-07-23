@@ -54,12 +54,14 @@ model Vm {
   proxmoxNode String?
   hostname    String
   ipType      String
-  status      String    @default("pending")
-  ipAddress   String?
-  sshPort     Int?
-  osTemplate  String?
-  expiresAt   DateTime?
-  createdAt   DateTime  @default(now())
+  status            String    @default("pending")
+  provisionProgress Int       @default(0)
+  provisionStep     String?
+  ipAddress         String?
+  sshPort           Int?
+  osTemplate        String?
+  expiresAt         DateTime?
+  createdAt         DateTime  @default(now())
 
   user            User             @relation(fields: [userId], references: [id])
   package         Package          @relation(fields: [packageId], references: [id])

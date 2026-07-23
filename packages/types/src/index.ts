@@ -29,6 +29,8 @@ export interface Vm {
   hostname: string
   ipType: IpType
   status: VmStatus
+  provisionProgress?: number
+  provisionStep?: string
   ipAddress?: string
   sshPort?: number
   osTemplate?: string

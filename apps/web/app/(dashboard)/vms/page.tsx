@@ -1,17 +1,37 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { VmCard } from '@/components/vm/vm-card'
 import { Plus } from 'lucide-react'
 import type { Vm } from '@nova/types'
 
+const POLL_INTERVAL = 3000
+const TRANSIENT = new Set(['pending', 'provisioning', 'starting', 'stopping', 'rebooting'])
+
 export default function VmsPage() {
   const [vms, setVms] = useState<Vm[]>([])
   const [loading, setLoading] = useState(true)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  async function load(initial = false) {
+    try {
+      const { data } = await api.get('/vms')
+      setVms(data)
+      if (initial) setLoading(false)
+
+      const hasTransient = data.some((v: Vm) => TRANSIENT.has(v.status))
+      if (hasTransient) {
+        timerRef.current = setTimeout(() => load(), POLL_INTERVAL)
+      }
+    } catch {
+      if (initial) setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    api.get('/vms').then(r => setVms(r.data)).finally(() => setLoading(false))
+    load(true)
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
   }, [])
 
   return (
