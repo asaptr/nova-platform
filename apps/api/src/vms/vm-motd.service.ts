@@ -212,17 +212,44 @@ export class VmMotdService {
       `echo ${profileB64} | base64 -d > /etc/profile.d/nova-restrict.sh && chmod 644 /etc/profile.d/nova-restrict.sh`])
   }
 
-  async syncAllRunning(brandName: string, panelUrl: string): Promise<void> {
+  async syncAllRunning(brandName: string, panelUrl: string): Promise<{ pushed: number; failed: number }> {
     const vms = await this.prisma.vm.findMany({
       where: { status: 'running', proxmoxVmid: { not: null }, proxmoxNode: { not: null } },
       select: { id: true, displayId: true, proxmoxNode: true, proxmoxVmid: true },
     })
     this.logger.log(`Syncing MOTD to ${vms.length} running VMs (brand="${brandName}")`)
+    let pushed = 0, failed = 0
     for (const vm of vms) {
-      this.writeToVm(vm.proxmoxNode, vm.proxmoxVmid, brandName, panelUrl)
-        .then(() => this.logger.log(`MOTD synced: ${vm.displayId}`))
-        .catch(e => this.logger.warn(`MOTD sync failed for ${vm.displayId}: ${e.message}`))
+      try {
+        await this.writeToVm(vm.proxmoxNode, vm.proxmoxVmid, brandName, panelUrl)
+        this.logger.log(`MOTD synced: ${vm.displayId}`)
+        pushed++
+      } catch (e: any) {
+        this.logger.warn(`MOTD sync failed for ${vm.displayId}: ${e.message}`)
+        failed++
+      }
     }
+    return { pushed, failed }
+  }
+
+  async enableAgentAllVms(): Promise<{ fixed: number; failed: number }> {
+    const vms = await this.prisma.vm.findMany({
+      where: { proxmoxVmid: { not: null }, proxmoxNode: { not: null }, status: { notIn: ['deleted', 'pending', 'failed'] } },
+      select: { displayId: true, proxmoxNode: true, proxmoxVmid: true },
+    })
+    this.logger.log(`Enabling agent config on ${vms.length} VMs`)
+    let fixed = 0, failed = 0
+    for (const vm of vms) {
+      try {
+        await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { agent: 'enabled=1,fstrim_cloned_disks=0' })
+        this.logger.log(`Agent enabled: ${vm.displayId}`)
+        fixed++
+      } catch (e: any) {
+        this.logger.warn(`Agent enable failed for ${vm.displayId}: ${e.message}`)
+        failed++
+      }
+    }
+    return { fixed, failed }
   }
 
   async pushRestrictionsToAllRunning(commands?: string[]): Promise<{ pushed: number; failed: number }> {

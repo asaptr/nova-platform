@@ -126,6 +126,7 @@ export default function SystemSettingsPage() {
   const [savingSection, setSavingSection] = useState<string | null>(null)
   const [pushingDns, setPushingDns] = useState(false)
   const [pushingMotd, setPushingMotd] = useState(false)
+  const [fixingAgent, setFixingAgent] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('branding')
 
   // Network state
@@ -190,6 +191,18 @@ export default function SystemSettingsPage() {
       toast(e.response?.data?.message ?? 'Gagal menyimpan', 'error')
     } finally {
       setSavingSection(null)
+    }
+  }
+
+  async function fixAgent() {
+    setFixingAgent(true)
+    try {
+      const { data } = await api.post('/admin/settings/fix-agent')
+      toast(data.message, 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal fix agent', 'error')
+    } finally {
+      setFixingAgent(false)
     }
   }
 
@@ -443,6 +456,25 @@ export default function SystemSettingsPage() {
               <SecretInput value={val('mikrotik.pass')} onChange={set('mikrotik.pass')} placeholder="password" />
             </Field>
             <SaveBar onSave={() => save('mikrotik', ['mikrotik.host', 'mikrotik.user', 'mikrotik.pass'])} saving={savingSection === 'mikrotik'} />
+          </div>
+
+          {/* Fix Agent */}
+          <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Fix Agent Config — Semua VM</p>
+              <p className="text-xs text-muted mt-0.5">
+                Enable <code className="font-mono bg-border/50 px-1 rounded">agent=enabled=1</code> di Proxmox config untuk semua VM.
+                Wajib dijalankan sekali untuk VM existing agar push MOTD, DNS, dan restricted commands bisa berjalan.
+              </p>
+            </div>
+            <button
+              onClick={fixAgent}
+              disabled={fixingAgent}
+              className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send size={13} className={fixingAgent ? 'animate-pulse' : ''} />
+              {fixingAgent ? 'Fixing...' : 'Fix Agent'}
+            </button>
           </div>
         </div>
       )}

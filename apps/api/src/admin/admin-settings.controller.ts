@@ -29,7 +29,6 @@ export class AdminSettingsController {
   ) {
     const toSave: Record<string, string> = {}
     for (const [key, value] of Object.entries(body)) {
-      // Skip masked placeholder — means field was not changed
       if (this.systemConfig.isMasked(value)) continue
       toSave[key] = value
     }
@@ -43,7 +42,6 @@ export class AdminSettingsController {
         metadata: { keys: Object.keys(toSave) },
       })
 
-      // Sync MOTD to all running VMs if brand or domain changed
       if ('brand.name' in toSave || 'domain.base' in toSave) {
         const brand = await this.systemConfig.getBrandConfig()
         const domainBase = await this.systemConfig.get('domain.base') ?? ''
@@ -65,8 +63,8 @@ export class AdminSettingsController {
     const brand = await this.systemConfig.getBrandConfig()
     const domainBase = await this.systemConfig.get('domain.base') ?? ''
     const panelUrl = domainBase ? `https://app.${domainBase.replace(/^https?:\/\//, '')}` : ''
-    this.vmMotd.syncAllRunning(brand.name || 'NOVA', panelUrl)
-    return { message: 'Mengirim MOTD & issue banner ke semua VM yang running...' }
+    const result = await this.vmMotd.syncAllRunning(brand.name || 'NOVA', panelUrl)
+    return { message: `MOTD pushed ke ${result.pushed} VM${result.failed ? `, gagal ${result.failed}` : ''}`, ...result }
   }
 
   @Post('push-dns')
@@ -76,9 +74,15 @@ export class AdminSettingsController {
     return { message: `DNS pushed ke ${result.pushed} VM${result.failed ? `, gagal ${result.failed}` : ''}`, ...result }
   }
 
+  @Post('fix-agent')
+  async fixAgent() {
+    const result = await this.vmMotd.enableAgentAllVms()
+    return { message: `Agent config diperbarui ke ${result.fixed} VM${result.failed ? `, gagal ${result.failed}` : ''}`, ...result }
+  }
+
   @Post('fix-vga')
   async fixVga() {
     this.vmMotd.fixVgaAllVms()
-    return { message: 'Memperbarui display config ke Standard VGA untuk semua VM. Stop → Start setiap VM agar efek.' }
+    return { message: 'Memperbarui display config ke Standard VGA untuk semua VM. Stop -> Start setiap VM agar efek.' }
   }
 }
