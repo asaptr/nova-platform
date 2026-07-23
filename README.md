@@ -319,8 +319,8 @@ pveum role add NOVARole -privs \
   "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit \
    VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network \
    VM.Config.Options VM.Console VM.Migrate VM.PowerMgmt \
-   VM.Snapshot VM.Snapshot.Rollback Datastore.AllocateSpace \
-   Datastore.AllocateTemplate Datastore.Audit SDN.Use Sys.Audit"
+   VM.Snapshot VM.Snapshot.Rollback VM.GuestAgent.Audit VM.GuestAgent.Unrestricted \
+   Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit SDN.Use Sys.Audit"
 
 # Assign role ke seluruh datacenter
 pveum aclmod / -user nova@pve -role NOVARole
@@ -637,12 +637,20 @@ Jalankan perintah `pveum` setelah set env ini.
 
 ### OS Templates tidak muncul di admin panel ("Tidak ada VM di Proxmox")
 
-Role `NOVARole` harus memiliki permission `VM.Audit`. Jika role sudah dibuat tanpa `VM.Audit`, tambahkan:
+Role `NOVARole` harus memiliki permission `VM.Audit`. Jika role sudah dibuat tanpa `VM.Audit`, gunakan perintah update role di bawah (sudah include semua privilege yang dibutuhkan).
+
+### Push MOTD / DNS / Restricted Commands gagal 403
+
+PVE 9 menambahkan privilege baru khusus qemu-guest-agent: `VM.GuestAgent.Unrestricted`. Tanpa ini, semua operasi agent (push MOTD, DNS, restricted commands, reset password) akan gagal 403.
+
+Jalankan di Proxmox host untuk update NOVARole dengan semua privilege yang dibutuhkan:
 
 ```bash
 export LC_ALL=C
-pveum role modify NOVARole --privs "Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,SDN.Use,Sys.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.Snapshot,VM.Snapshot.Rollback"
+pveum role modify NOVARole --privs "Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,SDN.Use,Sys.Audit,VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.CPU,VM.Config.Cloudinit,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.Snapshot,VM.Snapshot.Rollback,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted"
 ```
+
+Tidak perlu restart API — langsung coba push lagi dari admin panel.
 
 ### Update schema setelah pull terbaru
 
