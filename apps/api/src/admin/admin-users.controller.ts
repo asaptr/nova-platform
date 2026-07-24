@@ -47,15 +47,36 @@ export class AdminUsersController {
 
   @Get(':id')
   async getUser(@Param('id') id: string) {
-    const [user, vms, transactions, auditLogs] = await Promise.all([
+    const [user, vms, transactions, rawAuditLogs] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id },
         select: { id: true, email: true, fullName: true, phone: true, status: true, balance: true, createdAt: true },
       }),
       this.prisma.vm.findMany({ where: { userId: id }, include: { package: true }, orderBy: { createdAt: 'desc' } }),
-      this.prisma.transaction.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' }, take: 20 }),
-      this.prisma.auditLog.findMany({ where: { actorId: id, actorType: 'user' }, orderBy: { createdAt: 'desc' }, take: 50 }),
+      this.prisma.transaction.findMany({ where: { userId: id }, orderBy: { createdAt: 'desc' }, take: 200 }),
+      this.prisma.auditLog.findMany({ where: { actorId: id, actorType: 'user' }, orderBy: { createdAt: 'desc' }, take: 500 }),
     ])
+
+    // Backfill missing displayId for vm-type logs from VM table
+    const missingVmIds = rawAuditLogs
+      .filter(l => l.resourceType === 'vm' && !(l.metadata as any)?.displayId)
+      .map(l => l.resourceId)
+    const displayIdMap = new Map<string, string>()
+    if (missingVmIds.length > 0) {
+      const vmRecords = await this.prisma.vm.findMany({
+        where: { id: { in: [...new Set(missingVmIds)] } },
+        select: { id: true, displayId: true },
+      })
+      vmRecords.forEach(v => displayIdMap.set(v.id, v.displayId))
+    }
+    const auditLogs = rawAuditLogs.map(l => ({
+      ...l,
+      metadata: {
+        ...(l.metadata as object ?? {}),
+        displayId: (l.metadata as any)?.displayId ?? displayIdMap.get(l.resourceId) ?? null,
+      },
+    }))
+
     return { user, vms, transactions, auditLogs }
   }
 

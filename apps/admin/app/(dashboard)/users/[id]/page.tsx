@@ -21,10 +21,34 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   'user.activate':      { label: 'Aktifkan User',      color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
 }
 
+const VM_STATUSES = ['running', 'stopped', 'suspended', 'deleted', 'failed', 'pending', 'provisioning']
+
 function AuditActionBadge({ action }: { action: string }) {
   const info = ACTION_LABELS[action]
   if (info) return <span className={`text-xs px-2 py-0.5 rounded font-medium ${info.color}`}>{info.label}</span>
   return <span className="text-xs font-mono text-muted">{action}</span>
+}
+
+function FilterChips({ options, value, onChange }: {
+  options: { value: string; label: string }[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <div className="flex gap-1.5 flex-wrap">
+      <button
+        onClick={() => onChange('')}
+        className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${value === ''
+          ? 'bg-accent text-white' : 'bg-background border border-border text-muted hover:text-primary'}`}
+      >Semua</button>
+      {options.map(o => (
+        <button key={o.value} onClick={() => onChange(value === o.value ? '' : o.value)}
+          className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${value === o.value
+            ? 'bg-accent text-white' : 'bg-background border border-border text-muted hover:text-primary'}`}
+        >{o.label}</button>
+      ))}
+    </div>
+  )
 }
 
 type Tab = 'overview' | 'vms' | 'transactions' | 'audit'
@@ -38,8 +62,24 @@ export default function AdminUserDetailPage() {
   const [adjustNote, setAdjustNote] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [role, setRole] = useState('')
+
+  // VM tab filters
+  const [vmStatusFilter, setVmStatusFilter] = useState('')
+  const [vmPackageFilter, setVmPackageFilter] = useState('')
+  const [vmDateFrom, setVmDateFrom] = useState('')
+  const [vmDateTo, setVmDateTo] = useState('')
+  const [vmPage, setVmPage] = useState(1)
+  const [vmPageSize, setVmPageSize] = useState(25)
+
+  // Audit tab filters
+  const [auditVmFilter, setAuditVmFilter] = useState('')
+  const [auditActionFilter, setAuditActionFilter] = useState('')
+  const [auditDateFrom, setAuditDateFrom] = useState('')
+  const [auditDateTo, setAuditDateTo] = useState('')
   const [auditPage, setAuditPage] = useState(1)
   const [auditPageSize, setAuditPageSize] = useState(25)
+
+  // Tx tab
   const [txPage, setTxPage] = useState(1)
   const [txPageSize, setTxPageSize] = useState(25)
 
@@ -65,35 +105,70 @@ export default function AdminUserDetailPage() {
       setMsg('Saldo berhasil disesuaikan')
       setAdjustAmount(''); setAdjustNote('')
       const { data } = await api.get(`/admin/users/${id}`)
-      const { user, vms, transactions, auditLogs } = data
-      setUser({ ...user, vms, transactions, auditLogs })
+      setUser({ ...data.user, vms: data.vms, transactions: data.transactions, auditLogs: data.auditLogs })
     } catch (e: any) {
       setMsg(e.response?.data?.message ?? 'Gagal')
     }
   }
 
+  // VM filters
+  const allVms: any[] = useMemo(() => user?.vms ?? [], [user])
+  const vmPackageOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    allVms.forEach(v => { if (v.package) map.set(v.package.id, v.package.name) })
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }))
+  }, [allVms])
+  const filteredVms = useMemo(() => allVms.filter(v => {
+    if (vmStatusFilter && v.status !== vmStatusFilter) return false
+    if (vmPackageFilter && v.package?.id !== vmPackageFilter) return false
+    if (vmDateFrom && new Date(v.createdAt) < new Date(vmDateFrom)) return false
+    if (vmDateTo && new Date(v.createdAt) > new Date(vmDateTo + 'T23:59:59')) return false
+    return true
+  }), [allVms, vmStatusFilter, vmPackageFilter, vmDateFrom, vmDateTo])
+  const pagedVms = vmPageSize === 0 ? filteredVms : filteredVms.slice((vmPage - 1) * vmPageSize, vmPage * vmPageSize)
+
+  // Audit filters
+  const allAuditLogs: any[] = useMemo(() => user?.auditLogs ?? [], [user])
+  const auditVmOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    allAuditLogs.forEach(l => {
+      const name = l.metadata?.displayId
+      if (name) map.set(name, name)
+    })
+    return Array.from(map.entries()).map(([value, label]) => ({ value, label }))
+  }, [allAuditLogs])
+  const auditActionOptions = useMemo(() => {
+    const seen = new Set<string>()
+    allAuditLogs.forEach(l => seen.add(l.action))
+    return Array.from(seen).map(a => ({ value: a, label: ACTION_LABELS[a]?.label ?? a }))
+  }, [allAuditLogs])
+  const filteredAuditLogs = useMemo(() => allAuditLogs.filter(l => {
+    if (auditVmFilter && l.metadata?.displayId !== auditVmFilter) return false
+    if (auditActionFilter && l.action !== auditActionFilter) return false
+    if (auditDateFrom && new Date(l.createdAt) < new Date(auditDateFrom)) return false
+    if (auditDateTo && new Date(l.createdAt) > new Date(auditDateTo + 'T23:59:59')) return false
+    return true
+  }), [allAuditLogs, auditVmFilter, auditActionFilter, auditDateFrom, auditDateTo])
+  const pagedAuditLogs = auditPageSize === 0 ? filteredAuditLogs : filteredAuditLogs.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize)
+
+  // Tx
+  const allTxs: any[] = useMemo(() => user?.transactions ?? [], [user])
+  const pagedTxs = txPageSize === 0 ? allTxs : allTxs.slice((txPage - 1) * txPageSize, txPage * txPageSize)
+
   if (loading) return <div className="text-sm text-muted">Memuat...</div>
   if (!user) return <div className="text-sm text-red-500">User tidak ditemukan.</div>
 
-  const allAuditLogs: any[] = user.auditLogs ?? []
-  const pagedAuditLogs = auditPageSize === 0
-    ? allAuditLogs
-    : allAuditLogs.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize)
-
-  const allTxs: any[] = user.transactions ?? []
-  const pagedTxs = txPageSize === 0
-    ? allTxs
-    : allTxs.slice((txPage - 1) * txPageSize, txPage * txPageSize)
-
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'vms', label: `VM (${user.vms?.length ?? 0})` },
-    { key: 'transactions', label: `Transaksi (${user.transactions?.length ?? 0})` },
-    { key: 'audit', label: `Audit Log (${user.auditLogs?.length ?? 0})` },
+    { key: 'vms', label: `VM (${allVms.length})` },
+    { key: 'transactions', label: `Transaksi (${allTxs.length})` },
+    { key: 'audit', label: `Audit Log (${allAuditLogs.length})` },
   ]
 
+  const inputCls = 'border border-border rounded-lg px-2.5 py-1 text-xs bg-background outline-none focus:border-accent'
+
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5 max-w-5xl">
       <div className="flex items-center gap-3">
         <Link href="/users" className="p-1.5 rounded-lg hover:bg-card border border-transparent hover:border-border transition-colors">
           <ArrowLeft size={16} />
@@ -113,7 +188,6 @@ export default function AdminUserDetailPage() {
         </div>
       )}
 
-      {/* Tab nav */}
       <div className="flex gap-1 bg-card border border-border rounded-xl p-1">
         {tabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
@@ -148,7 +222,6 @@ export default function AdminUserDetailPage() {
 
           {role === 'superadmin' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Toggle status */}
               <div className="bg-card border border-border rounded-xl p-4 space-y-3">
                 <h2 className="font-semibold text-sm">Kelola Status</h2>
                 <button onClick={toggleStatus}
@@ -162,12 +235,10 @@ export default function AdminUserDetailPage() {
                 </button>
               </div>
 
-              {/* Adjust balance */}
               <div className="bg-card border border-border rounded-xl p-4 space-y-3">
                 <h2 className="font-semibold text-sm">Sesuaikan Saldo</h2>
                 <input value={adjustAmount} onChange={e => setAdjustAmount(e.target.value)}
-                  placeholder="Jumlah (negatif untuk debit)"
-                  type="number"
+                  placeholder="Jumlah (negatif untuk debit)" type="number"
                   className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
                 />
                 <input value={adjustNote} onChange={e => setAdjustNote(e.target.value)}
@@ -176,9 +247,7 @@ export default function AdminUserDetailPage() {
                 />
                 <button onClick={adjustBalance} disabled={!adjustAmount}
                   className="w-full bg-accent text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:opacity-90 transition-colors"
-                >
-                  Terapkan
-                </button>
+                >Terapkan</button>
               </div>
             </div>
           )}
@@ -187,6 +256,40 @@ export default function AdminUserDetailPage() {
 
       {tab === 'vms' && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
+          {/* VM Filters */}
+          <div className="px-4 py-3 border-b border-border space-y-2.5">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 items-center">
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted uppercase font-medium">Status</p>
+                <FilterChips
+                  value={vmStatusFilter}
+                  onChange={v => { setVmStatusFilter(v); setVmPage(1) }}
+                  options={VM_STATUSES.map(s => ({ value: s, label: s }))}
+                />
+              </div>
+              {vmPackageOptions.length > 1 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted uppercase font-medium">Paket</p>
+                  <FilterChips
+                    value={vmPackageFilter}
+                    onChange={v => { setVmPackageFilter(v); setVmPage(1) }}
+                    options={vmPackageOptions}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 items-center">
+              <span className="text-[10px] text-muted uppercase font-medium">Tanggal Dibuat:</span>
+              <input type="date" value={vmDateFrom} onChange={e => { setVmDateFrom(e.target.value); setVmPage(1) }} className={inputCls} />
+              <span className="text-xs text-muted">–</span>
+              <input type="date" value={vmDateTo} onChange={e => { setVmDateTo(e.target.value); setVmPage(1) }} className={inputCls} />
+              {(vmDateFrom || vmDateTo) && (
+                <button onClick={() => { setVmDateFrom(''); setVmDateTo(''); setVmPage(1) }}
+                  className="text-xs text-muted hover:text-red-500 transition-colors">✕ Reset</button>
+              )}
+            </div>
+          </div>
+
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
@@ -196,7 +299,7 @@ export default function AdminUserDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {(user.vms ?? []).map((vm: any) => (
+              {pagedVms.map((vm: any) => (
                 <tr key={vm.id} className="hover:bg-background/50">
                   <td className="px-4 py-3">
                     <Link href={`/vms/${vm.id}`} className="text-accent hover:underline font-medium">{vm.hostname}</Link>
@@ -212,7 +315,8 @@ export default function AdminUserDetailPage() {
               ))}
             </tbody>
           </table>
-          {(user.vms ?? []).length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada VM.</p>}
+          {filteredVms.length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada VM.</p>}
+          <Pagination total={filteredVms.length} page={vmPage} pageSize={vmPageSize} onPage={setVmPage} onPageSize={setVmPageSize} />
         </div>
       )}
 
@@ -249,6 +353,38 @@ export default function AdminUserDetailPage() {
 
       {tab === 'audit' && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
+          {/* Audit Filters */}
+          <div className="px-4 py-3 border-b border-border space-y-2.5">
+            {auditVmOptions.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] text-muted uppercase font-medium">VM</p>
+                <FilterChips
+                  value={auditVmFilter}
+                  onChange={v => { setAuditVmFilter(v); setAuditPage(1) }}
+                  options={auditVmOptions}
+                />
+              </div>
+            )}
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted uppercase font-medium">Aksi</p>
+              <FilterChips
+                value={auditActionFilter}
+                onChange={v => { setAuditActionFilter(v); setAuditPage(1) }}
+                options={auditActionOptions}
+              />
+            </div>
+            <div className="flex gap-2 items-center">
+              <span className="text-[10px] text-muted uppercase font-medium">Waktu:</span>
+              <input type="date" value={auditDateFrom} onChange={e => { setAuditDateFrom(e.target.value); setAuditPage(1) }} className={inputCls} />
+              <span className="text-xs text-muted">–</span>
+              <input type="date" value={auditDateTo} onChange={e => { setAuditDateTo(e.target.value); setAuditPage(1) }} className={inputCls} />
+              {(auditDateFrom || auditDateTo) && (
+                <button onClick={() => { setAuditDateFrom(''); setAuditDateTo(''); setAuditPage(1) }}
+                  className="text-xs text-muted hover:text-red-500 transition-colors">✕ Reset</button>
+              )}
+            </div>
+          </div>
+
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
@@ -264,7 +400,7 @@ export default function AdminUserDetailPage() {
                     <AuditActionBadge action={log.action} />
                   </td>
                   <td className="px-4 py-3 text-xs font-mono text-muted">
-                    {log.metadata?.displayId ?? log.resourceId?.slice(0, 8) ?? '—'}
+                    {log.metadata?.displayId ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-xs">
                     <span className="font-medium">{user.fullName ?? user.email}</span>
@@ -275,8 +411,8 @@ export default function AdminUserDetailPage() {
               ))}
             </tbody>
           </table>
-          {allAuditLogs.length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada log.</p>}
-          <Pagination total={allAuditLogs.length} page={auditPage} pageSize={auditPageSize} onPage={setAuditPage} onPageSize={setAuditPageSize} />
+          {filteredAuditLogs.length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada log.</p>}
+          <Pagination total={filteredAuditLogs.length} page={auditPage} pageSize={auditPageSize} onPage={setAuditPage} onPageSize={setAuditPageSize} />
         </div>
       )}
     </div>
