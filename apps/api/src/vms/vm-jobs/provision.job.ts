@@ -266,6 +266,9 @@ export class ProvisionJob {
           await this.vmMotd.syncTimezoneToVm(node, vmid, timezone ?? 'Asia/Jakarta').catch((e) => {
             this.logger.warn(`[${displayId}] Timezone/NTP sync failed: ${e.message}`)
           })
+          await this.vmMotd.pushDnsToVm(node, vmid, dnsPrimary, dnsSecondary).catch((e) => {
+            this.logger.warn(`[${displayId}] DNS push failed: ${e.message}`)
+          })
         }).catch((e) => {
           this.logger.warn(`[${displayId}] Agent tidak ready (${e.message}), password sudah di-set via cloud-init`)
         })
