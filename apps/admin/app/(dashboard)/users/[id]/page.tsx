@@ -18,8 +18,26 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   'vm.reset_password':  { label: 'Ganti Password',     color: 'bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300' },
   'vm.suspend':         { label: 'Suspend (Billing)',  color: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
   'settings.update':    { label: 'Ubah Pengaturan',    color: 'bg-gray-50 text-gray-600 dark:bg-gray-900 dark:text-gray-400' },
+  'user.login':         { label: 'Login',              color: 'bg-gray-50 text-gray-600 dark:bg-gray-900 dark:text-gray-400' },
+  'user.register':      { label: 'Registrasi',         color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
   'user.suspend':       { label: 'Suspend User',       color: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
   'user.activate':      { label: 'Aktifkan User',      color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
+}
+
+const VM_STATUS_COLOR: Record<string, string> = {
+  running:      'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300',
+  stopped:      'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+  suspended:    'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+  deleted:      'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400',
+  failed:       'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
+  pending:      'bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-400',
+  provisioning: 'bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+}
+
+const TX_STATUS_COLOR: Record<string, string> = {
+  success: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300',
+  pending: 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+  failed:  'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300',
 }
 
 const VM_STATUSES = ['running', 'stopped', 'suspended', 'deleted', 'failed', 'pending', 'provisioning']
@@ -307,7 +325,7 @@ export default function AdminUserDetailPage() {
                     <p className="text-xs text-muted">{vm.displayId}</p>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">{vm.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${VM_STATUS_COLOR[vm.status] ?? 'bg-gray-100 text-gray-600 dark:bg-gray-800'}`}>{vm.status}</span>
                   </td>
                   <td className="px-4 py-3 text-muted">{vm.package?.name ?? '—'}</td>
                   <td className="px-4 py-3 font-mono text-xs">{vm.ipAddress ?? '—'}</td>
@@ -339,7 +357,7 @@ export default function AdminUserDetailPage() {
                     {tx.amount > 0 ? '+' : ''}{formatRupiah(tx.amount)}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">{tx.status}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded font-medium ${TX_STATUS_COLOR[tx.status] ?? 'bg-gray-100 text-gray-600 dark:bg-gray-800'}`}>{tx.status}</span>
                   </td>
                   <td className="px-4 py-3 text-muted text-xs">{tx.description ?? '—'}</td>
                   <td className="px-4 py-3 text-muted text-xs">{formatDate(tx.createdAt)}</td>
@@ -404,7 +422,10 @@ export default function AdminUserDetailPage() {
                     {log.metadata?.displayId ?? '—'}
                   </td>
                   <td className="px-4 py-3 text-xs">
-                    <span className="font-medium">{user.fullName ?? user.email}</span>
+                    {log.actorType === 'system'
+                      ? <span className="font-medium text-muted">System</span>
+                      : <span className="font-medium">{user.fullName ?? user.email}</span>
+                    }
                     <span className="text-muted ml-1 text-[10px]">({log.actorType})</span>
                   </td>
                   <td className="px-4 py-3 text-muted text-xs">{formatDate(log.createdAt)}</td>
