@@ -16,6 +16,7 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   'vm.terminal_access': { label: 'Akses Terminal SSH', color: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300' },
   'vm.console_access':  { label: 'Akses Web Console',  color: 'bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-300' },
   'vm.reset_password':  { label: 'Ganti Password',     color: 'bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300' },
+  'vm.suspend':         { label: 'Suspend (Billing)',  color: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
   'settings.update':    { label: 'Ubah Pengaturan',    color: 'bg-gray-50 text-gray-600 dark:bg-gray-900 dark:text-gray-400' },
   'user.suspend':       { label: 'Suspend User',       color: 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' },
   'user.activate':      { label: 'Aktifkan User',      color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },

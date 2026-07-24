@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { ProxmoxService } from '../proxmox/proxmox.service'
 import { MikrotikService } from '../mikrotik/mikrotik.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { AuditService } from '../audit/audit.service'
 
 const LOW_BALANCE_THRESHOLD = 10000
 // VM suspended when balance <= -(priceHourly * GRACE_HOURS)
@@ -20,6 +21,7 @@ export class BillingService {
     private proxmox: ProxmoxService,
     private mikrotik: MikrotikService,
     private notifications: NotificationsService,
+    private audit: AuditService,
   ) {}
 
   async getTransactions(userId: string, page = 1, limit = 20, type?: string) {
@@ -136,6 +138,8 @@ export class BillingService {
       await this.proxmox.stopVm(vm.proxmoxNode, vm.proxmoxVmid).catch((e) => {
         this.logger.warn(`Could not stop VM ${vm.displayId}: ${e.message}`)
       })
+      // Disable auto-restart so node reboots don't revive a suspended VM
+      await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { onboot: 0 }).catch(() => {})
     }
     for (const pf of vm.natPortForwards ?? []) {
       await this.mikrotik.disableSshForward(pf.externalPort).catch(() => {})
@@ -145,6 +149,14 @@ export class BillingService {
       where: { id: vm.id },
       data: { status: 'suspended', expiresAt },
     })
+    await this.audit.log({
+      actorType: 'system',
+      actorId: 'billing',
+      action: 'vm.suspend',
+      resourceType: 'vm',
+      resourceId: vm.id,
+      metadata: { displayId: vm.displayId, reason: 'insufficient_balance' },
+    }).catch(() => {})
     await this.notifications.sendVmSuspended(vm.user.email, vm.hostname).catch(() => {})
     this.logger.warn(`VM ${vm.displayId} suspended — balance exceeded ${GRACE_HOURS}h debt limit`)
   }

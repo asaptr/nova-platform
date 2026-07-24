@@ -195,16 +195,22 @@ export class VmsService {
       throw new BadRequestException('VM sedang diproses, tunggu hingga selesai')
     }
 
+    // Block any start attempt when balance is negative
+    const userBalance = await this.prisma.user.findUnique({ where: { id: userId }, select: { balance: true } })
+    if (Number(userBalance?.balance ?? 0) < 0) {
+      throw new BadRequestException(
+        `Saldo masih minus. Silakan topup untuk melunasi tagihan sebelum menyalakan VM.`,
+      )
+    }
+
     if (vm.status === 'suspended') {
-      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { balance: true } })
-      if (Number(user.balance) < 0) {
-        throw new BadRequestException(
-          `Saldo masih minus (Rp ${Number(user.balance).toFixed(0)}). Silakan topup untuk melunasi tagihan sebelum menyalakan VM.`,
-        )
-      }
       const ports = await this.prisma.natPortForward.findMany({ where: { vmId } })
       for (const pf of ports) {
         await this.mikrotik.enableSshForward(pf.externalPort).catch(() => {})
+      }
+      // Re-enable auto-restart now that user has paid up
+      if (vm.proxmoxVmid && vm.proxmoxNode) {
+        await this.proxmox.updateVmConfig(vm.proxmoxNode, vm.proxmoxVmid, { onboot: 1 }).catch(() => {})
       }
     }
 
