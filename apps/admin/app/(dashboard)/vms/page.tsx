@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate } from '@/lib/utils'
+import { Pagination } from '@/components/ui/pagination'
 
 const POLL_INTERVAL = 3000
 const TRANSIENT = new Set(['pending', 'provisioning', 'starting', 'stopping', 'rebooting'])
@@ -51,6 +52,8 @@ export default function AdminVmsPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   async function load(resetLoading = false) {
@@ -59,6 +62,8 @@ export default function AdminVmsPage() {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (status) params.set('status', status)
+      params.set('page', String(page))
+      params.set('limit', pageSize === 0 ? '1000' : String(pageSize))
       const { data } = await api.get(`/admin/vms?${params}`)
       setVms(data.items)
       setTotal(data.total)
@@ -72,11 +77,12 @@ export default function AdminVmsPage() {
     }
   }
 
+  useEffect(() => { setPage(1) }, [search, status])
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current)
     load(true)
     return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [search, status])
+  }, [search, status, page, pageSize])
 
   return (
     <div className="space-y-4">
@@ -111,7 +117,7 @@ export default function AdminVmsPage() {
           </thead>
           <tbody className="divide-y divide-border">
             {loading ? (
-              Array.from({length: 5}).map((_, i) => (
+              Array.from({length: Math.min(pageSize || 5, 5)}).map((_, i) => (
                 <tr key={i}><td colSpan={8} className="px-4 py-3"><div className="h-4 bg-background rounded animate-pulse" /></td></tr>
               ))
             ) : vms.map(vm => (
@@ -141,6 +147,7 @@ export default function AdminVmsPage() {
         {!loading && vms.length === 0 && (
           <p className="text-center py-10 text-muted text-sm">Tidak ada VM ditemukan.</p>
         )}
+        <Pagination total={total} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
       </div>
     </div>
   )

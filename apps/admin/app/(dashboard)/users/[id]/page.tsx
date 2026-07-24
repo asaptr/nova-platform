@@ -1,10 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate, formatRupiah } from '@/lib/utils'
 import { ArrowLeft } from 'lucide-react'
+import { Pagination } from '@/components/ui/pagination'
 
 const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   'vm.create':          { label: 'Buat VM',           color: 'bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-300' },
@@ -37,6 +38,10 @@ export default function AdminUserDetailPage() {
   const [adjustNote, setAdjustNote] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [role, setRole] = useState('')
+  const [auditPage, setAuditPage] = useState(1)
+  const [auditPageSize, setAuditPageSize] = useState(25)
+  const [txPage, setTxPage] = useState(1)
+  const [txPageSize, setTxPageSize] = useState(25)
 
   useEffect(() => {
     setRole(localStorage.getItem('admin_role') ?? '')
@@ -69,6 +74,16 @@ export default function AdminUserDetailPage() {
 
   if (loading) return <div className="text-sm text-muted">Memuat...</div>
   if (!user) return <div className="text-sm text-red-500">User tidak ditemukan.</div>
+
+  const allAuditLogs: any[] = user.auditLogs ?? []
+  const pagedAuditLogs = auditPageSize === 0
+    ? allAuditLogs
+    : allAuditLogs.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize)
+
+  const allTxs: any[] = user.transactions ?? []
+  const pagedTxs = txPageSize === 0
+    ? allTxs
+    : allTxs.slice((txPage - 1) * txPageSize, txPage * txPageSize)
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
@@ -212,7 +227,7 @@ export default function AdminUserDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {(user.transactions ?? []).map((tx: any) => (
+              {pagedTxs.map((tx: any) => (
                 <tr key={tx.id} className="hover:bg-background/50">
                   <td className="px-4 py-3 capitalize">{tx.type}</td>
                   <td className={`px-4 py-3 font-medium ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -227,7 +242,8 @@ export default function AdminUserDetailPage() {
               ))}
             </tbody>
           </table>
-          {(user.transactions ?? []).length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada transaksi.</p>}
+          {allTxs.length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada transaksi.</p>}
+          <Pagination total={allTxs.length} page={txPage} pageSize={txPageSize} onPage={setTxPage} onPageSize={setTxPageSize} />
         </div>
       )}
 
@@ -242,7 +258,7 @@ export default function AdminUserDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {(user.auditLogs ?? []).map((log: any) => (
+              {pagedAuditLogs.map((log: any) => (
                 <tr key={log.id} className="hover:bg-background/50">
                   <td className="px-4 py-3">
                     <AuditActionBadge action={log.action} />
@@ -259,7 +275,8 @@ export default function AdminUserDetailPage() {
               ))}
             </tbody>
           </table>
-          {(user.auditLogs ?? []).length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada log.</p>}
+          {allAuditLogs.length === 0 && <p className="text-center py-8 text-muted text-sm">Tidak ada log.</p>}
+          <Pagination total={allAuditLogs.length} page={auditPage} pageSize={auditPageSize} onPage={setAuditPage} onPageSize={setAuditPageSize} />
         </div>
       )}
     </div>

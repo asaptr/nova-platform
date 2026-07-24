@@ -1,33 +1,56 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { BalanceCard } from '@/components/billing/balance-card'
 import { formatRupiah, formatDate } from '@/lib/utils'
-import type { Transaction, User } from '@nova/types'
+import type { User } from '@nova/types'
 import { ArrowUpRight, ArrowDownLeft, Clock } from 'lucide-react'
+import { Pagination } from '@/components/ui/pagination'
 
-const TX_TYPES = [
-  { value: '', label: 'Semua' },
+type FilterType = 'all' | 'topup' | 'adjustment' | 'usage'
+
+const FILTERS: { value: FilterType; label: string }[] = [
+  { value: 'all', label: 'Semua' },
   { value: 'topup', label: 'Topup' },
   { value: 'adjustment', label: 'Penyesuaian' },
+  { value: 'usage', label: 'Penggunaan Jam' },
 ]
 
-const typeLabel: Record<string, string> = {
+const TX_LABEL: Record<string, string> = {
   topup: 'Topup Saldo',
   adjustment: 'Penyesuaian Admin',
   charge: 'Tagihan Hourly',
 }
 
-type Tab = 'transactions' | 'usage'
+type Entry = {
+  id: string
+  kind: 'tx' | 'usage'
+  type: string
+  label: string
+  date: string
+  dateEnd?: string
+  amount: number
+  vmDisplayId?: string
+  vmId?: string
+  notes?: string
+  status?: string
+}
+
+function formatShortDate(d: string) {
+  const dt = new Date(d)
+  return dt.toLocaleString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 export default function BillingPage() {
   const [user, setUser] = useState<User | null>(null)
-  const [txs, setTxs] = useState<Transaction[]>([])
+  const [txs, setTxs] = useState<any[]>([])
   const [usages, setUsages] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<Tab>('transactions')
-  const [typeFilter, setTypeFilter] = useState('')
+  const [filter, setFilter] = useState<FilterType>('all')
+  const [vmFilter, setVmFilter] = useState<string>('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   useEffect(() => {
     api.get('/users/me').then(r => setUser(r.data))
@@ -35,17 +58,78 @@ export default function BillingPage() {
 
   useEffect(() => {
     setLoading(true)
-    if (tab === 'transactions') {
-      const params = typeFilter ? `?type=${typeFilter}` : ''
-      api.get(`/billing/transactions${params}`)
-        .then(r => setTxs(r.data.items))
-        .finally(() => setLoading(false))
-    } else {
-      api.get('/billing/usage')
-        .then(r => setUsages(r.data))
-        .finally(() => setLoading(false))
-    }
-  }, [tab, typeFilter])
+    Promise.all([
+      api.get('/billing/transactions?limit=200').then(r => r.data.items),
+      api.get('/billing/usage').then(r => r.data),
+    ]).then(([t, u]) => {
+      setTxs(t)
+      setUsages(u)
+    }).finally(() => setLoading(false))
+  }, [])
+
+  // Merge transactions + usages into unified sorted list
+  const allEntries = useMemo<Entry[]>(() => {
+    const txEntries: Entry[] = txs.map(tx => ({
+      id: tx.id,
+      kind: 'tx',
+      type: tx.type,
+      label: TX_LABEL[tx.type] ?? tx.type,
+      date: tx.createdAt,
+      amount: Number(tx.amount),
+      notes: tx.notes,
+      status: tx.status,
+    }))
+    const usageEntries: Entry[] = usages.map(u => ({
+      id: u.id,
+      kind: 'usage',
+      type: 'usage',
+      label: u.vm?.displayId ?? u.vmId?.slice(-8) ?? '—',
+      date: u.periodStart,
+      dateEnd: u.periodEnd,
+      amount: -Number(u.amountCharged),
+      vmDisplayId: u.vm?.displayId,
+      vmId: u.vmId,
+    }))
+    return [...txEntries, ...usageEntries].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }, [txs, usages])
+
+  // Compute running balance (newest → oldest, starting from current balance)
+  const entriesWithBalance = useMemo(() => {
+    const balance = user ? Number(user.balance) : null
+    if (balance === null) return allEntries.map(e => ({ ...e, balanceAfter: null as number | null }))
+    let running = balance
+    return allEntries.map(e => {
+      const after = running
+      running -= e.amount
+      return { ...e, balanceAfter: after }
+    })
+  }, [allEntries, user])
+
+  // Unique VMs in usage entries
+  const vmOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    usages.forEach(u => {
+      if (u.vmId) map.set(u.vmId, u.vm?.displayId ?? u.vmId.slice(-8))
+    })
+    return Array.from(map.entries()).map(([id, label]) => ({ id, label }))
+  }, [usages])
+
+  // Apply filters
+  const filtered = useMemo(() => {
+    return entriesWithBalance.filter(e => {
+      if (filter === 'topup' && e.type !== 'topup') return false
+      if (filter === 'adjustment' && e.type !== 'adjustment') return false
+      if (filter === 'usage' && e.kind !== 'usage') return false
+      if (vmFilter && e.vmId !== vmFilter) return false
+      return true
+    })
+  }, [entriesWithBalance, filter, vmFilter])
+
+  // Paginated slice
+  const paginated = useMemo(() => {
+    if (pageSize === 0) return filtered
+    return filtered.slice((page - 1) * pageSize, page * pageSize)
+  }, [filtered, page, pageSize])
 
   return (
     <div className="space-y-5 max-w-4xl">
@@ -59,108 +143,108 @@ export default function BillingPage() {
       {user && <BalanceCard balance={Number(user.balance)} />}
 
       <div className="bg-card border border-border rounded-xl">
-        {/* Tabs */}
-        <div className="flex border-b border-border">
-          {([
-            { key: 'transactions', label: 'Transaksi' },
-            { key: 'usage', label: 'Penggunaan Jam' },
-          ] as { key: Tab; label: string }[]).map(t => (
+        {/* Filter chips */}
+        <div className="flex gap-1.5 px-4 py-3 border-b border-border flex-wrap">
+          {FILTERS.map(f => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`px-5 py-3.5 text-sm font-medium border-b-2 transition-colors ${tab === t.key
-                ? 'border-accent text-accent'
-                : 'border-transparent text-muted hover:text-primary'}`}
+              key={f.value}
+              onClick={() => { setFilter(f.value); setVmFilter(''); setPage(1) }}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filter === f.value
+                ? 'bg-accent text-white'
+                : 'bg-background border border-border text-muted hover:text-primary'}`}
             >
-              {t.label}
+              {f.label}
             </button>
           ))}
         </div>
 
-        {/* Transaction type filter */}
-        {tab === 'transactions' && (
-          <div className="flex gap-1.5 px-4 py-3 border-b border-border flex-wrap">
-            {TX_TYPES.map(t => (
+        {/* VM sub-filter */}
+        {vmOptions.length > 0 && (filter === 'usage' || filter === 'all') && (
+          <div className="flex gap-1.5 px-4 py-2.5 border-b border-border flex-wrap bg-background/50">
+            <span className="text-xs text-muted self-center">VM:</span>
+            <button
+              onClick={() => { setVmFilter(''); setPage(1) }}
+              className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${vmFilter === ''
+                ? 'bg-accent/15 text-accent border border-accent/30'
+                : 'bg-background border border-border text-muted hover:text-primary'}`}
+            >
+              Semua
+            </button>
+            {vmOptions.map(v => (
               <button
-                key={t.value}
-                onClick={() => setTypeFilter(t.value)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${typeFilter === t.value
-                  ? 'bg-accent text-white'
+                key={v.id}
+                onClick={() => { setVmFilter(vmFilter === v.id ? '' : v.id); setPage(1) }}
+                className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-medium transition-colors ${vmFilter === v.id
+                  ? 'bg-accent/15 text-accent border border-accent/30'
                   : 'bg-background border border-border text-muted hover:text-primary'}`}
               >
-                {t.label}
+                {v.label}
               </button>
             ))}
           </div>
         )}
 
-        {/* Transaction list */}
-        {tab === 'transactions' && (
-          loading ? (
-            <div className="p-5 space-y-3">
-              {[1,2,3].map(i => <div key={i} className="h-12 bg-background rounded-lg animate-pulse" />)}
-            </div>
-          ) : txs.length === 0 ? (
-            <p className="p-8 text-center text-muted text-sm">Tidak ada transaksi.</p>
-          ) : (
+        {/* Unified list */}
+        {loading ? (
+          <div className="p-5 space-y-3">
+            {[1,2,3].map(i => <div key={i} className="h-12 bg-background rounded-lg animate-pulse" />)}
+          </div>
+        ) : filtered.length === 0 ? (
+          <p className="p-8 text-center text-muted text-sm">Tidak ada data.</p>
+        ) : (
+          <>
             <div className="divide-y divide-border">
-              {txs.map(tx => {
-                const amount = Number(tx.amount)
-                const isCredit = amount >= 0
+              {paginated.map(entry => {
+                const isCredit = entry.amount >= 0
                 return (
-                  <div key={tx.id} className="flex items-center gap-3 px-5 py-3">
-                    <div className={`p-2 rounded-full ${isCredit ? 'bg-green-50 dark:bg-green-950' : 'bg-red-50 dark:bg-red-950'}`}>
-                      {isCredit
-                        ? <ArrowUpRight size={14} className="text-green-600" />
-                        : <ArrowDownLeft size={14} className="text-red-500" />
+                  <div key={entry.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className={`p-2 rounded-full flex-shrink-0 ${
+                      entry.kind === 'usage'
+                        ? 'bg-blue-50 dark:bg-blue-950'
+                        : isCredit ? 'bg-green-50 dark:bg-green-950' : 'bg-red-50 dark:bg-red-950'
+                    }`}>
+                      {entry.kind === 'usage'
+                        ? <Clock size={14} className="text-blue-500" />
+                        : isCredit
+                          ? <ArrowUpRight size={14} className="text-green-600" />
+                          : <ArrowDownLeft size={14} className="text-red-500" />
                       }
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{typeLabel[tx.type] ?? tx.type}</p>
-                      {tx.notes && <p className="text-xs text-muted truncate">{tx.notes}</p>}
-                      <p className="text-xs text-muted">{formatDate(tx.createdAt)}</p>
+                      <p className="text-sm font-medium truncate">
+                        {entry.kind === 'usage' ? (
+                          <span className="font-mono">{entry.label}</span>
+                        ) : entry.label}
+                      </p>
+                      {entry.notes && <p className="text-xs text-muted truncate">{entry.notes}</p>}
+                      <p className="text-xs text-muted">
+                        {entry.dateEnd
+                          ? `${formatShortDate(entry.date)} → ${formatShortDate(entry.dateEnd)}`
+                          : formatDate(entry.date)
+                        }
+                      </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex-shrink-0">
                       <p className={`text-sm font-semibold ${isCredit ? 'text-green-600' : 'text-red-500'}`}>
-                        {isCredit ? '+' : ''}{formatRupiah(amount)}
+                        {isCredit ? '+' : ''}{formatRupiah(entry.amount)}
                       </p>
-                      <p className={`text-xs ${tx.status === 'success' ? 'text-green-500' : tx.status === 'pending' ? 'text-amber-500' : 'text-red-500'}`}>
-                        {tx.status}
-                      </p>
+                      {entry.balanceAfter !== null && (
+                        <p className={`text-xs ${entry.balanceAfter < 0 ? 'text-red-400' : 'text-muted'}`}>
+                          Sisa {formatRupiah(entry.balanceAfter)}
+                        </p>
+                      )}
+                      {entry.status && (
+                        <p className={`text-xs ${entry.status === 'success' ? 'text-green-500' : entry.status === 'pending' ? 'text-amber-500' : 'text-red-500'}`}>
+                          {entry.status}
+                        </p>
+                      )}
                     </div>
                   </div>
                 )
               })}
             </div>
-          )
-        )}
-
-        {/* Usage list */}
-        {tab === 'usage' && (
-          loading ? (
-            <div className="p-5 space-y-3">
-              {[1,2,3].map(i => <div key={i} className="h-10 bg-background rounded-lg animate-pulse" />)}
-            </div>
-          ) : usages.length === 0 ? (
-            <p className="p-8 text-center text-muted text-sm">Belum ada catatan penggunaan.</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {usages.map((u: any) => (
-                <div key={u.id} className="flex items-center gap-3 px-5 py-3">
-                  <div className="p-2 rounded-full bg-blue-50 dark:bg-blue-950">
-                    <Clock size={14} className="text-blue-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium font-mono">{u.vmId?.slice(-8)}</p>
-                    <p className="text-xs text-muted">
-                      {formatDate(u.periodStart)} → {formatDate(u.periodEnd)}
-                    </p>
-                  </div>
-                  <p className="text-sm font-semibold text-red-500">−{formatRupiah(Number(u.amountCharged))}</p>
-                </div>
-              ))}
-            </div>
-          )
+            <Pagination total={filtered.length} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
+          </>
         )}
       </div>
     </div>

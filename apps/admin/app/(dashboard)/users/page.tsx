@@ -3,23 +3,30 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
 import { formatDate, formatRupiah } from '@/lib/utils'
+import { Pagination } from '@/components/ui/pagination'
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<any[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   async function load() {
     setLoading(true)
     const params = new URLSearchParams()
     if (search) params.set('search', search)
+    params.set('page', String(page))
+    params.set('limit', pageSize === 0 ? '1000' : String(pageSize))
     const { data } = await api.get(`/admin/users?${params}`)
-    setUsers(data.items); setTotal(data.total)
+    setUsers(data.items)
+    setTotal(data.total)
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [search])
+  useEffect(() => { setPage(1) }, [search])
+  useEffect(() => { load() }, [search, page, pageSize])
 
   return (
     <div className="space-y-4">
@@ -44,7 +51,7 @@ export default function AdminUsersPage() {
           </thead>
           <tbody className="divide-y divide-border">
             {loading ? (
-              Array.from({ length: 5 }).map((_, i) => (
+              Array.from({ length: Math.min(pageSize || 5, 5) }).map((_, i) => (
                 <tr key={i}><td colSpan={6} className="px-4 py-3"><div className="h-4 bg-background rounded animate-pulse" /></td></tr>
               ))
             ) : users.map(u => (
@@ -73,6 +80,7 @@ export default function AdminUsersPage() {
         {!loading && users.length === 0 && (
           <p className="text-center py-10 text-muted text-sm">Tidak ada user ditemukan.</p>
         )}
+        <Pagination total={total} page={page} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
       </div>
     </div>
   )

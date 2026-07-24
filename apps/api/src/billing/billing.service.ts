@@ -42,7 +42,8 @@ export class BillingService {
     return this.prisma.billingUsage.findMany({
       where: { userId, ...(vmId ? { vmId } : {}) },
       orderBy: { periodStart: 'desc' },
-      take: 50,
+      take: 200,
+      include: { vm: { select: { displayId: true, hostname: true } } },
     })
   }
 
