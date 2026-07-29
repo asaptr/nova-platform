@@ -1,0 +1,881 @@
+'use client'
+import { useEffect, useState, useCallback } from 'react'
+import api from '@/lib/api'
+import { Save, AlertTriangle, Eye, EyeOff, Globe, Shield, Server, Zap, ExternalLink, Network, Plus, RefreshCw, Send, ShieldOff, Trash2 } from 'lucide-react'
+import { useToast } from '@/components/ui/toast'
+
+// ── CIDR helpers ───────────────────────────────────────────────────────────────
+function ipToNum(ip: string): number {
+  const parts = ip.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(p => isNaN(p))) return 0
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0
+}
+function numToIp(n: number): string {
+  return [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff].join('.')
+}
+function numToMask(prefix: number): string {
+  return numToIp(prefix === 0 ? 0 : (~((1 << (32 - prefix)) - 1)) >>> 0)
+}
+function calcCidr(cidr: string) {
+  const [ipPart, prefixStr] = cidr.split('/')
+  const prefix = parseInt(prefixStr ?? '')
+  if (!ipPart || isNaN(prefix) || prefix < 8 || prefix > 30) return null
+  const totalHosts = Math.pow(2, 32 - prefix)
+  const mask = (~(totalHosts - 1)) >>> 0
+  const networkNum = (ipToNum(ipPart) & mask) >>> 0
+  const broadcastNum = (networkNum + totalHosts - 1) >>> 0
+  return {
+    network:   numToIp(networkNum),
+    broadcast: numToIp(broadcastNum),
+    gateway:   numToIp(networkNum + 1),
+    netmask:   numToMask(prefix),
+    prefix,
+    usable:    totalHosts - 2,
+    firstHost: numToIp(networkNum + 2),
+    lastHost:  numToIp(broadcastNum - 1),
+  }
+}
+
+const DNS_PRESETS = [
+  { label: 'Cloudflare (1.1.1.1)', primary: '1.1.1.1', secondary: '1.0.0.1' },
+  { label: 'Google (8.8.8.8)', primary: '8.8.8.8', secondary: '8.4.4.8' },
+  { label: 'Quad9 (9.9.9.9)', primary: '9.9.9.9', secondary: '149.112.112.112' },
+  { label: 'OpenDNS', primary: '208.67.222.222', secondary: '208.67.220.220' },
+  { label: 'Custom', primary: '', secondary: '' },
+]
+
+const MASK = '••••••••'
+const SUBDOMAINS = ['app', 'admin', 'api', 'status', 'docs', 'changelog']
+
+type Tab = 'branding' | 'domain' | 'infra' | 'network' | 'blocked'
+
+const TABS: { id: Tab; label: string; icon: any }[] = [
+  { id: 'branding', label: 'Branding',          icon: Zap },
+  { id: 'domain',   label: 'Domain',             icon: Globe },
+  { id: 'infra',    label: 'Infrastruktur',      icon: Server },
+  { id: 'network',  label: 'Network & NAT',      icon: Network },
+  { id: 'blocked',  label: 'Blocked Commands',   icon: ShieldOff },
+]
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
+function Field({ label, note, children }: { label: string; note?: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <label className="text-xs font-medium text-muted">{label}</label>
+      {children}
+      {note && <p className="text-xs text-muted">{note}</p>}
+    </div>
+  )
+}
+
+function Input({ value, onChange, placeholder, type = 'text' }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; type?: string
+}) {
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent transition-colors"
+    />
+  )
+}
+
+function SecretInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [show, setShow] = useState(false)
+  const isMasked = value === MASK
+  return (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={isMasked ? '(tidak berubah)' : placeholder}
+        className="w-full border border-border rounded-lg px-3 py-2 pr-9 text-sm bg-background outline-none focus:border-accent transition-colors"
+      />
+      <button
+        type="button"
+        onClick={() => setShow(v => !v)}
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted hover:text-primary"
+      >
+        {show ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  )
+}
+
+function SaveBar({ onSave, saving }: { onSave: () => void; saving: boolean }) {
+  return (
+    <div className="flex justify-end pt-4 border-t border-border mt-6">
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
+      >
+        <Save size={14} /> {saving ? 'Menyimpan...' : 'Simpan'}
+      </button>
+    </div>
+  )
+}
+
+// ── MOTD Preview ───────────────────────────────────────────────────────────────
+function MotdPreview({ brand, panelUrl, headline }: { brand: string; panelUrl: string; headline: string }) {
+  const lines = [
+    '  ==================================================',
+    `   ${brand}`,
+    headline ? `   ${headline}` : null,
+    '  --------------------------------------------------',
+    '   Host   : vm-xxxxxxxx',
+    '   IP     : 10.20.0.x',
+    '   CPU    : 1 vCPU',
+    '   Memory : 256M / 512M',
+    '   Disk   : 3.2G / 10G',
+    '   Uptime : 2 minutes',
+    panelUrl ? '  --------------------------------------------------' : null,
+    panelUrl ? `   Panel  : ${panelUrl}` : null,
+    '  ==================================================',
+  ].filter(Boolean) as string[]
+
+  return (
+    <div className="bg-[#0d1117] rounded-lg p-4 font-mono text-xs leading-relaxed overflow-x-auto">
+      <p className="text-[#8b949e] mb-1">root@vm-xxxxxxxx:~# <span className="text-[#cdd9e5]">ssh login</span></p>
+      <p className="text-[#cdd9e5] mb-1"></p>
+      {lines.map((line, i) => (
+        <p key={i} className="text-[#7ee787] whitespace-pre">{line}</p>
+      ))}
+      <p className="text-[#cdd9e5] mt-1"></p>
+      <p className="text-[#8b949e]">root@vm-xxxxxxxx:~# <span className="animate-pulse">_</span></p>
+    </div>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────────
+export default function SystemSettingsPage() {
+  const { toast } = useToast()
+  const [cfg, setCfg] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [savingSection, setSavingSection] = useState<string | null>(null)
+  const [pushingDns, setPushingDns] = useState(false)
+  const [pushingMotd, setPushingMotd] = useState(false)
+  const [fixingAgent, setFixingAgent] = useState(false)
+  const [activeTab, setActiveTab] = useState<Tab>('branding')
+
+  // Blocked commands state
+  type Cmd = { id: string; command: string; description: string | null; isActive: boolean }
+  const [cmds, setCmds] = useState<Cmd[]>([])
+  const [cmdsLoading, setCmdsLoading] = useState(false)
+  const [pushingRestrictions, setPushingRestrictions] = useState(false)
+  const [newCmd, setNewCmd] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [showCmdForm, setShowCmdForm] = useState(false)
+
+  // Network state
+  const [bridges, setBridges] = useState<any[]>([])
+  const [bridgesLoading, setBridgesLoading] = useState(false)
+  const [dnsPreset, setDnsPreset] = useState('Cloudflare (1.1.1.1)')
+  const [newBridge, setNewBridge] = useState({ iface: '', bridgePorts: '', address: '', netmask: '' })
+  const [showNewBridge, setShowNewBridge] = useState(false)
+
+  const fetchBridges = useCallback(async () => {
+    setBridgesLoading(true)
+    try {
+      const { data } = await api.get('/admin/network/bridges')
+      setBridges(data)
+    } catch { setBridges([]) }
+    finally { setBridgesLoading(false) }
+  }, [])
+
+  useEffect(() => {
+    api.get('/admin/settings').then(r => {
+      setCfg(r.data)
+      setLoading(false)
+      const p = r.data['nat.dns_primary']
+      if (p) {
+        const found = DNS_PRESETS.find(d => d.primary === p)
+        setDnsPreset(found ? found.label : 'Custom')
+      }
+    }).catch(() => setLoading(false))
+    fetchBridges()
+  }, [fetchBridges])
+
+  useEffect(() => {
+    if (activeTab === 'blocked' && cmds.length === 0) loadCmds()
+  }, [activeTab])
+
+  function val(key: string) { return cfg[key] ?? '' }
+  function set(key: string) { return (v: string) => setCfg(prev => ({ ...prev, [key]: v })) }
+
+  async function save(section: string, keys: string[]) {
+    setSavingSection(section)
+    try {
+      const payload: Record<string, string> = {}
+      for (const k of keys) {
+        const v = cfg[k] ?? ''
+        if (v !== '') payload[k] = v
+      }
+      if (Object.keys(payload).length === 0) {
+        toast('Tidak ada nilai yang diisi untuk disimpan', 'warning')
+        setSavingSection(null)
+        return
+      }
+      await api.put('/admin/settings', payload)
+
+      if (section === 'network' && (payload['nat.network'] || payload['nat.bridge'])) {
+        try {
+          const { data } = await api.post('/admin/network/apply-gateway')
+          toast(`Tersimpan — ${data.message}`, 'success')
+        } catch (e: any) {
+          toast(`Tersimpan, tapi apply gateway gagal: ${e.response?.data?.message ?? e.message}`, 'warning')
+        }
+        return
+      }
+
+      toast('Pengaturan berhasil disimpan', 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal menyimpan', 'error')
+    } finally {
+      setSavingSection(null)
+    }
+  }
+
+  async function fixAgent() {
+    setFixingAgent(true)
+    try {
+      const { data } = await api.post('/admin/settings/fix-agent')
+      toast(data.message, 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal fix agent', 'error')
+    } finally {
+      setFixingAgent(false)
+    }
+  }
+
+  async function pushMotd() {
+    setPushingMotd(true)
+    try {
+      const { data } = await api.post('/admin/settings/sync-motd')
+      toast(data.message, 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal push MOTD', 'error')
+    } finally {
+      setPushingMotd(false)
+    }
+  }
+
+  async function pushDns() {
+    const primary = cfg['nat.dns_primary'] ?? ''
+    const secondary = cfg['nat.dns_secondary'] ?? ''
+    if (!primary) { toast('Isi DNS Primary terlebih dahulu', 'warning'); return }
+    setPushingDns(true)
+    try {
+      const { data } = await api.post('/admin/settings/push-dns', { primary, secondary })
+      toast(data.message, 'success')
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal push DNS', 'error')
+    } finally {
+      setPushingDns(false)
+    }
+  }
+
+  async function loadCmds() {
+    setCmdsLoading(true)
+    try {
+      const { data } = await api.get('/admin/restricted-commands')
+      setCmds(data)
+    } finally { setCmdsLoading(false) }
+  }
+
+  async function addCmd() {
+    if (!newCmd.trim()) return
+    try {
+      await api.post('/admin/restricted-commands', { command: newCmd.trim(), description: newDesc.trim() || undefined })
+      setNewCmd(''); setNewDesc(''); setShowCmdForm(false)
+      toast('Perintah ditambahkan', 'success')
+      loadCmds()
+    } catch (e: any) { toast(e.response?.data?.message ?? 'Gagal menambah', 'error') }
+  }
+
+  async function toggleCmd(c: Cmd) {
+    await api.patch(`/admin/restricted-commands/${c.id}`, { isActive: !c.isActive })
+    toast(c.isActive ? `${c.command} dinonaktifkan` : `${c.command} diaktifkan`, 'success')
+    loadCmds()
+  }
+
+  async function removeCmd(c: Cmd) {
+    if (!confirm(`Hapus "${c.command}"?`)) return
+    await api.delete(`/admin/restricted-commands/${c.id}`)
+    toast(`${c.command} dihapus`, 'success')
+    loadCmds()
+  }
+
+  async function pushRestrictions() {
+    setPushingRestrictions(true)
+    try {
+      const { data } = await api.post('/admin/restricted-commands/push-all')
+      toast(data.message, 'success')
+    } catch (e: any) { toast(e.response?.data?.message ?? 'Gagal push', 'error') }
+    finally { setPushingRestrictions(false) }
+  }
+
+  async function createBridge() {
+    try {
+      const { data } = await api.post('/admin/network/bridges', newBridge)
+      toast(data.message, 'success')
+      setNewBridge({ iface: '', bridgePorts: '', address: '', netmask: '' })
+      setShowNewBridge(false)
+      fetchBridges()
+    } catch (e: any) {
+      toast(e.response?.data?.message ?? 'Gagal membuat bridge', 'error')
+    }
+  }
+
+  const baseDomain = val('domain.base').replace(/^https?:\/\//, '').replace(/\/$/, '')
+
+  if (loading) return <div className="text-sm text-muted">Memuat pengaturan...</div>
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold">Pengaturan Sistem</h1>
+        <p className="text-sm text-muted mt-1">Konfigurasi platform NOVA</p>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-border">
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              activeTab === id
+                ? 'border-accent text-accent'
+                : 'border-transparent text-muted hover:text-primary hover:border-border'
+            }`}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab: Branding */}
+      {activeTab === 'branding' && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-3 p-3 bg-accent/5 border border-accent/20 rounded-lg">
+            <div className="w-8 h-8 rounded-md bg-accent flex items-center justify-center flex-shrink-0">
+              <span className="text-white font-bold text-xs">N</span>
+            </div>
+            <div>
+              <p className="text-sm font-semibold">NOVA</p>
+              <p className="text-xs text-muted">Node Orchestration &amp; Virtualization Architecture</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Nama Brand" note="Nama platform / perusahaan yang muncul di UI.">
+              <Input value={val('brand.name')} onChange={set('brand.name')} placeholder="Nama platform Anda" />
+            </Field>
+            <Field label="Tagline">
+              <Input value={val('brand.tagline')} onChange={set('brand.tagline')} placeholder="Slogan platform Anda" />
+            </Field>
+          </div>
+
+          <Field label="Logo URL" note="URL gambar logo. Kosongkan untuk pakai ikon default.">
+            <Input value={val('brand.logo_url')} onChange={set('brand.logo_url')} placeholder="https://..." />
+          </Field>
+          {val('brand.logo_url') && (
+            <img src={val('brand.logo_url')} alt="logo preview" className="h-10 object-contain rounded border border-border" />
+          )}
+
+          <Field label="Timezone" note="Zona waktu yang ditampilkan di seluruh platform (timestamp log, billing, dll).">
+            <select
+              value={val('brand.timezone') || 'Asia/Jakarta'}
+              onChange={e => set('brand.timezone')(e.target.value)}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent transition-colors"
+            >
+              <optgroup label="Asia Tenggara">
+                <option value="Asia/Jakarta">Asia/Jakarta — GMT+7 (WIB)</option>
+                <option value="Asia/Makassar">Asia/Makassar — GMT+8 (WITA)</option>
+                <option value="Asia/Jayapura">Asia/Jayapura — GMT+9 (WIT)</option>
+                <option value="Asia/Singapore">Asia/Singapore — GMT+8 (SGT)</option>
+                <option value="Asia/Kuala_Lumpur">Asia/Kuala_Lumpur — GMT+8 (MYT)</option>
+                <option value="Asia/Bangkok">Asia/Bangkok — GMT+7 (ICT)</option>
+                <option value="Asia/Manila">Asia/Manila — GMT+8 (PST)</option>
+                <option value="Asia/Ho_Chi_Minh">Asia/Ho_Chi_Minh — GMT+7 (ICT)</option>
+              </optgroup>
+              <optgroup label="Asia Timur">
+                <option value="Asia/Shanghai">Asia/Shanghai — GMT+8 (CST)</option>
+                <option value="Asia/Tokyo">Asia/Tokyo — GMT+9 (JST)</option>
+                <option value="Asia/Seoul">Asia/Seoul — GMT+9 (KST)</option>
+              </optgroup>
+              <optgroup label="Asia Lainnya">
+                <option value="Asia/Dubai">Asia/Dubai — GMT+4 (GST)</option>
+                <option value="Asia/Kolkata">Asia/Kolkata — GMT+5:30 (IST)</option>
+              </optgroup>
+              <optgroup label="Eropa">
+                <option value="Europe/London">Europe/London — GMT+0/+1</option>
+                <option value="Europe/Paris">Europe/Paris — GMT+1/+2</option>
+              </optgroup>
+              <optgroup label="Amerika">
+                <option value="America/New_York">America/New_York — GMT-5/-4</option>
+                <option value="America/Los_Angeles">America/Los_Angeles — GMT-8/-7</option>
+              </optgroup>
+              <option value="UTC">UTC — GMT+0</option>
+            </select>
+          </Field>
+
+          <Field label="Headline MOTD (opsional)" note="Teks tambahan yang muncul di bawah nama brand pada banner SSH VM. Kosongkan untuk tidak menampilkan.">
+            <Input value={val('motd.headline')} onChange={set('motd.headline')} placeholder="Managed VPS Platform — support@domain.com" />
+          </Field>
+
+          {/* MOTD Preview */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted">Preview Banner SSH</p>
+            <MotdPreview brand={val('brand.name') || 'NOVA'} panelUrl={val('domain.base') ? `https://app.${val('domain.base').replace(/^https?:\/\//,'')}` : ''} headline={val('motd.headline')} />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 bg-background border border-border rounded-lg">
+            <div>
+              <p className="text-xs font-medium">Push Banner ke Semua VM</p>
+              <p className="text-xs text-muted mt-0.5">Kirim MOTD & banner login ke semua VM running via qemu-agent. VM baru otomatis menerima banner saat provisioning.</p>
+            </div>
+            <button
+              onClick={pushMotd}
+              disabled={pushingMotd}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-xs text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send size={12} className={pushingMotd ? 'animate-pulse' : ''} />
+              {pushingMotd ? 'Pushing...' : 'Push MOTD'}
+            </button>
+          </div>
+
+          <SaveBar onSave={() => save('brand', ['brand.name', 'brand.tagline', 'brand.logo_url', 'brand.timezone', 'motd.headline'])} saving={savingSection === 'brand'} />
+        </div>
+      )}
+
+      {/* Tab: Domain */}
+      {activeTab === 'domain' && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <Field label="Domain Utama" note="Masukkan domain tanpa subdomain, misalnya: yourdomain.com">
+            <Input value={val('domain.base')} onChange={set('domain.base')} placeholder="domain.com" />
+          </Field>
+
+          {baseDomain ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted">Subdomain yang akan digunakan:</p>
+              <div className="grid grid-cols-2 gap-2">
+                {SUBDOMAINS.map(sub => (
+                  <div key={sub} className="flex items-center justify-between gap-2 px-3 py-2 bg-background border border-border rounded-lg">
+                    <span className="text-xs font-mono text-primary truncate">{sub}.{baseDomain}</span>
+                    <a
+                      href={`https://${sub}.${baseDomain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted hover:text-accent flex-shrink-0"
+                    >
+                      <ExternalLink size={11} />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted italic">Isi domain utama di atas untuk melihat preview subdomain.</p>
+          )}
+
+          <SaveBar onSave={() => save('domain', ['domain.base'])} saving={savingSection === 'domain'} />
+        </div>
+      )}
+
+      {/* Tab: Infrastruktur */}
+      {activeTab === 'infra' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+            <AlertTriangle size={13} />
+            Perubahan infrastructure memerlukan restart API server untuk berlaku.
+          </div>
+
+          {/* Proxmox */}
+          <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Server size={15} className="text-accent" />
+              <h2 className="font-semibold text-sm">Proxmox VE</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Host / IP">
+                <Input value={val('proxmox.host')} onChange={set('proxmox.host')} placeholder="10.10.10.250" />
+              </Field>
+              <Field label="Port">
+                <Input value={val('proxmox.port')} onChange={set('proxmox.port')} placeholder="8006" />
+              </Field>
+              <Field label="Node Name">
+                <Input value={val('proxmox.node')} onChange={set('proxmox.node')} placeholder="pve" />
+              </Field>
+              <Field label="Token ID">
+                <Input value={val('proxmox.token_id')} onChange={set('proxmox.token_id')} placeholder="user@pve!tokenname" />
+              </Field>
+            </div>
+            <Field label="Token Secret">
+              <SecretInput value={val('proxmox.token_secret')} onChange={set('proxmox.token_secret')} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            </Field>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="verify_ssl"
+                checked={val('proxmox.verify_ssl') === 'true'}
+                onChange={e => set('proxmox.verify_ssl')(e.target.checked ? 'true' : 'false')}
+                className="rounded"
+              />
+              <label htmlFor="verify_ssl" className="text-sm">Verify SSL Certificate</label>
+            </div>
+            <SaveBar onSave={() => save('proxmox', ['proxmox.host', 'proxmox.port', 'proxmox.node', 'proxmox.token_id', 'proxmox.token_secret', 'proxmox.verify_ssl'])} saving={savingSection === 'proxmox'} />
+          </div>
+
+          {/* MikroTik */}
+          <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Shield size={15} className="text-accent" />
+              <h2 className="font-semibold text-sm">MikroTik</h2>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="MikroTik Host">
+                <Input value={val('mikrotik.host')} onChange={set('mikrotik.host')} placeholder="10.10.10.1" />
+              </Field>
+              <Field label="MikroTik User">
+                <Input value={val('mikrotik.user')} onChange={set('mikrotik.user')} placeholder="nova-api" />
+              </Field>
+            </div>
+            <Field label="MikroTik Password">
+              <SecretInput value={val('mikrotik.pass')} onChange={set('mikrotik.pass')} placeholder="password" />
+            </Field>
+            <SaveBar onSave={() => save('mikrotik', ['mikrotik.host', 'mikrotik.user', 'mikrotik.pass'])} saving={savingSection === 'mikrotik'} />
+          </div>
+
+          {/* Fix Agent */}
+          <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Fix Agent Config — Semua VM</p>
+              <p className="text-xs text-muted mt-0.5">
+                Enable <code className="font-mono bg-border/50 px-1 rounded">agent=enabled=1</code> di Proxmox config untuk semua VM.
+                Wajib dijalankan sekali untuk VM existing agar push MOTD, DNS, dan restricted commands bisa berjalan.
+              </p>
+            </div>
+            <button
+              onClick={fixAgent}
+              disabled={fixingAgent}
+              className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send size={13} className={fixingAgent ? 'animate-pulse' : ''} />
+              {fixingAgent ? 'Fixing...' : 'Fix Agent'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Network & NAT */}
+      {activeTab === 'network' && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          {/* CIDR */}
+          {(() => {
+            const cidr = val('nat.network') || ''
+            const calc = cidr.includes('/') ? calcCidr(cidr) : null
+            return (
+              <div className="space-y-3">
+                <Field label="Network Range (CIDR)" note="Range IP yang digunakan untuk VM NAT. Contoh: 10.20.0.0/20">
+                  <Input value={val('nat.network')} onChange={set('nat.network')} placeholder="10.20.0.0/24" />
+                </Field>
+                {calc ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      ['Gateway (auto)', calc.gateway],
+                      ['Netmask', calc.netmask],
+                      ['Prefix', `/${calc.prefix}`],
+                      ['Usable IPs', calc.usable.toLocaleString()],
+                      ['Network', calc.network],
+                      ['Broadcast', calc.broadcast],
+                      ['First Host', calc.firstHost],
+                      ['Last Host', calc.lastHost],
+                    ].map(([label, v]) => (
+                      <div key={label} className="bg-background border border-border rounded-lg px-3 py-2">
+                        <p className="text-xs text-muted">{label}</p>
+                        <p className="text-sm font-mono font-medium">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : cidr ? (
+                  <p className="text-xs text-red-500">Format CIDR tidak valid. Gunakan format: 10.20.0.0/24</p>
+                ) : null}
+              </div>
+            )
+          })()}
+
+          {/* Bridges */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-muted">NAT Bridge</label>
+              <div className="flex items-center gap-2">
+                <button onClick={fetchBridges} className="text-xs text-muted hover:text-primary flex items-center gap-1">
+                  <RefreshCw size={11} className={bridgesLoading ? 'animate-spin' : ''} /> Refresh
+                </button>
+                <button onClick={() => setShowNewBridge(v => !v)} className="text-xs text-accent hover:opacity-80 flex items-center gap-1">
+                  <Plus size={11} /> Buat Bridge Baru
+                </button>
+              </div>
+            </div>
+            <select
+              value={val('nat.bridge') || ''}
+              onChange={e => set('nat.bridge')(e.target.value)}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent transition-colors"
+            >
+              <option value="">-- Pilih bridge --</option>
+              {bridges.map(b => (
+                <option key={b.iface} value={b.iface}>
+                  {b.iface}{b.active ? '' : ' (inactive)'}{b.bridgePorts ? ` — ports: ${b.bridgePorts}` : ' — no ports'}
+                </option>
+              ))}
+              {bridges.length === 0 && !bridgesLoading && (
+                <option disabled>Tidak dapat memuat bridge dari Proxmox</option>
+              )}
+            </select>
+
+            {showNewBridge && (
+              <div className="border border-border rounded-xl p-4 space-y-3 bg-background">
+                <p className="text-xs font-semibold text-muted uppercase tracking-wide">Buat Virtual Bridge Baru</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Nama Bridge" note="Contoh: vmbr2">
+                    <Input value={newBridge.iface} onChange={v => setNewBridge(b => ({ ...b, iface: v }))} placeholder="vmbr2" />
+                  </Field>
+                  <Field label="Bridge Ports" note="Interface fisik. Kosongkan untuk bridge internal.">
+                    <Input value={newBridge.bridgePorts} onChange={v => setNewBridge(b => ({ ...b, bridgePorts: v }))} placeholder="eth1 (opsional)" />
+                  </Field>
+                  <Field label="IP Address (opsional)" note="Untuk routing host">
+                    <Input value={newBridge.address} onChange={v => setNewBridge(b => ({ ...b, address: v }))} placeholder="10.20.0.1" />
+                  </Field>
+                  <Field label="Netmask (opsional)">
+                    <Input value={newBridge.netmask} onChange={v => setNewBridge(b => ({ ...b, netmask: v }))} placeholder="255.255.255.0" />
+                  </Field>
+                </div>
+                <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-300">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                  Membuat bridge akan langsung di-apply ke Proxmox node. Pastikan tidak mengganggu konektivitas.
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={createBridge}
+                    disabled={!newBridge.iface}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 hover:opacity-90"
+                  >
+                    <Plus size={12} /> Buat & Apply
+                  </button>
+                  <button onClick={() => setShowNewBridge(false)} className="px-3 py-1.5 border border-border rounded-lg text-xs">
+                    Batal
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Public bridge */}
+          <Field label="Public Bridge" note="Bridge untuk VM dengan IP publik langsung.">
+            <select
+              value={val('public.bridge') || ''}
+              onChange={e => set('public.bridge')(e.target.value)}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent transition-colors"
+            >
+              <option value="">-- Pilih bridge --</option>
+              {bridges.map(b => (
+                <option key={b.iface} value={b.iface}>{b.iface}{b.bridgePorts ? ` — ports: ${b.bridgePorts}` : ''}</option>
+              ))}
+            </select>
+          </Field>
+
+          {/* Gateway + Public IP */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Gateway Override" note="Kosongkan untuk auto-pakai gateway dari CIDR.">
+              <Input value={val('nat.gateway')} onChange={set('nat.gateway')} placeholder={calcCidr(val('nat.network'))?.gateway ?? '10.20.0.1'} />
+            </Field>
+            <Field label="NAT Public IP" note="IP publik server untuk SSH forwarding ke VM.">
+              <Input value={val('nat.public_ip')} onChange={set('nat.public_ip')} placeholder="1.2.3.4" />
+            </Field>
+          </div>
+
+          {/* DNS */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted">DNS Server untuk VM</label>
+            <div className="flex flex-wrap gap-2">
+              {DNS_PRESETS.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => {
+                    setDnsPreset(p.label)
+                    if (p.primary) {
+                      set('nat.dns_primary')(p.primary)
+                      set('nat.dns_secondary')(p.secondary)
+                    }
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors border ${dnsPreset === p.label
+                    ? 'bg-accent text-white border-accent'
+                    : 'bg-background border-border text-muted hover:text-primary'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="DNS Primary">
+                <Input value={val('nat.dns_primary')} onChange={v => { set('nat.dns_primary')(v); setDnsPreset('Custom') }} placeholder="1.1.1.1" />
+              </Field>
+              <Field label="DNS Secondary">
+                <Input value={val('nat.dns_secondary')} onChange={v => { set('nat.dns_secondary')(v); setDnsPreset('Custom') }} placeholder="1.0.0.1" />
+              </Field>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 p-3 bg-background border border-border rounded-lg">
+            <div>
+              <p className="text-xs font-medium">Push DNS ke Semua VM</p>
+              <p className="text-xs text-muted mt-0.5">Update /etc/resolv.conf di semua VM yang sedang running via qemu-agent.</p>
+            </div>
+            <button
+              onClick={pushDns}
+              disabled={pushingDns || !cfg['nat.dns_primary']}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-xs text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+            >
+              <Send size={12} className={pushingDns ? 'animate-pulse' : ''} />
+              {pushingDns ? 'Pushing...' : 'Push DNS'}
+            </button>
+          </div>
+
+          <div className="flex items-start gap-2 text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2.5">
+            <Server size={13} className="mt-0.5 shrink-0" />
+            <span>
+              Saat menyimpan Network & NAT, gateway bridge di Proxmox <b>dan iptables masquerade</b> akan diperbarui otomatis.
+              Untuk update iptables, set <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 rounded">PROXMOX_SSH_KEY</code> atau <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 rounded">PROXMOX_SSH_PASSWORD</code> di <code className="font-mono bg-blue-100 dark:bg-blue-900 px-1 rounded">.env</code> API.
+            </span>
+          </div>
+
+          <SaveBar onSave={() => save('network', ['nat.network', 'nat.bridge', 'nat.gateway', 'nat.public_ip', 'nat.dns_primary', 'nat.dns_secondary', 'public.bridge'])} saving={savingSection === 'network'} />
+        </div>
+      )}
+
+      {/* Tab: Blocked Commands */}
+      {activeTab === 'blocked' && (
+        <div className="space-y-4">
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-sm text-amber-800 dark:text-amber-300">
+            <p className="font-medium">Cara kerja</p>
+            <p className="mt-1 text-amber-700 dark:text-amber-400 text-xs">
+              Perintah aktif diblokir via shell function override + symlink wrapper di seluruh binary path VM.
+              Setelah mengubah daftar, klik <strong>Push ke Semua VM</strong>. VM baru otomatis mendapat daftar terbaru saat provisioning.
+            </p>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldOff size={15} className="text-accent" />
+                <h2 className="font-semibold text-sm">Daftar Blocked Commands</h2>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={pushRestrictions}
+                  disabled={pushingRestrictions}
+                  className="flex items-center gap-1.5 border border-border px-3 py-1.5 rounded-lg text-xs text-muted hover:text-primary hover:border-accent/50 transition-colors disabled:opacity-50"
+                >
+                  <Send size={12} className={pushingRestrictions ? 'animate-pulse' : ''} />
+                  {pushingRestrictions ? 'Pushing...' : 'Push ke Semua VM'}
+                </button>
+                <button
+                  onClick={() => setShowCmdForm(v => !v)}
+                  className="flex items-center gap-1.5 bg-accent text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:opacity-90"
+                >
+                  <Plus size={12} /> Tambah
+                </button>
+              </div>
+            </div>
+
+            {showCmdForm && (
+              <div className="border border-border rounded-lg p-3 space-y-3 bg-background">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted">Nama Perintah</label>
+                    <input
+                      value={newCmd}
+                      onChange={e => setNewCmd(e.target.value)}
+                      placeholder="contoh: dd, mkfs"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted">Deskripsi (opsional)</label>
+                    <input
+                      value={newDesc}
+                      onChange={e => setNewDesc(e.target.value)}
+                      placeholder="Keterangan singkat"
+                      className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background outline-none focus:border-accent"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setShowCmdForm(false)} className="px-3 py-1.5 border border-border rounded-lg text-xs">Batal</button>
+                  <button
+                    onClick={addCmd}
+                    disabled={!newCmd.trim()}
+                    className="px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 hover:opacity-90"
+                  >
+                    Tambah
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="border border-border rounded-lg overflow-hidden">
+              {cmdsLoading ? (
+                <div className="p-6 text-center text-sm text-muted">Memuat...</div>
+              ) : cmds.length === 0 ? (
+                <div className="p-8 text-center text-sm text-muted">Belum ada blocked commands.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-background">
+                      {['Perintah', 'Deskripsi', 'Aktif', ''].map(h => (
+                        <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-muted uppercase">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {cmds.map(c => (
+                      <tr key={c.id} className="hover:bg-background/50">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <ShieldOff size={12} className={c.isActive ? 'text-red-500' : 'text-muted'} />
+                            <span className="font-mono font-medium text-xs">{c.command}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted">{c.description ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => toggleCmd(c)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${c.isActive ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                          >
+                            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${c.isActive ? 'translate-x-4' : 'translate-x-1'}`} />
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => removeCmd(c)} className="p-1 text-muted hover:text-red-500 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

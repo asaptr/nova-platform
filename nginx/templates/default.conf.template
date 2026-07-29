@@ -1,0 +1,104 @@
+# Upstreams
+upstream api {
+    server api:3000;
+}
+upstream web {
+    server web:3001;
+}
+upstream admin {
+    server admin:3002;
+}
+
+# Rate limit zones
+limit_req_zone $binary_remote_addr zone=api:10m rate=30r/s;
+limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/m;
+
+# 1. Landing Page (domain.com & www.domain.com)
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+
+    # Redirect user portal paths to app subdomain
+    location ~* ^/(login|register|dashboard|billing|tickets|verify-email) {
+        return 301 $scheme://${APP_SUBDOMAIN}.${DOMAIN}$request_uri;
+    }
+
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/v1/auth/ {
+        limit_req zone=auth burst=3 nodelay;
+        proxy_pass http://api/api/v1/auth/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        proxy_pass http://web;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# 2. User App Portal (app.domain.com)
+server {
+    listen 80;
+    server_name ${APP_SUBDOMAIN}.${DOMAIN};
+
+    # If visiting the root on app subdomain, redirect to login
+    location = / {
+        return 301 $scheme://${APP_SUBDOMAIN}.${DOMAIN}/login;
+    }
+
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/v1/auth/ {
+        limit_req zone=auth burst=3 nodelay;
+        proxy_pass http://api/api/v1/auth/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        proxy_pass http://web;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+# 3. Admin Panel (admin.domain.com)
+server {
+    listen 80;
+    server_name ${ADMIN_SUBDOMAIN}.${DOMAIN};
+
+    location /api/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location / {
+        proxy_pass http://admin;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
